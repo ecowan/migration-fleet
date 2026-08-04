@@ -23,6 +23,17 @@ verification step so a human can pick it up.
   `pyproject.toml` dependencies and dependency groups.
 - Generate a `uv.lock` with `uv lock`. Use `uv sync` for installs in recipes.
 
+## 3b. Pin in-fleet upstreams to `cursor.dev` tags
+- If this playbook includes a **Fleet upstream pins** section, those packages were
+  already migrated in an earlier wave and tagged `cursor.dev/<sha>` on their PR
+  head. Treat that section as authoritative.
+- For each listed upstream, add a git dependency in `pyproject.toml` exactly as
+  specified (PEP 508 direct URL). Example shape:
+  `common-utils @ git+https://github.com/org/common-utils.git@cursor.dev/<shortsha>`
+- Remove sibling path hacks / bare version pins for those packages.
+- Re-run `uv lock` after editing pins. Mention every `cursor.dev/…` tag under an
+  **Upstream pins** heading in the PR description.
+
 ## 4. Upgrade Python 3.11 → 3.14
 - Set `requires-python = ">=3.14"`, update `.python-version` to `3.14`, and any
   classifiers / CI matrix.

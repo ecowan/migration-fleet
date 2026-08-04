@@ -3,7 +3,8 @@ from .models import AgentRun, CheckResult, FleetResult, RepoTarget, Status, Wave
 from .cursor_client import CursorClient, MockCursorClient, RestCursorClient
 from .live_status import LiveStatusBar
 from .orchestrator import FleetOrchestrator, format_duration, summarize
-from .report import console_table, render_html
+from .report import console_table, cost_summary, render_html
+from .tags import DevTag, GitHubTagPublisher, MockTagPublisher
 
 __all__ = [
     "AgentRun",
@@ -17,8 +18,12 @@ __all__ = [
     "RestCursorClient",
     "FleetOrchestrator",
     "LiveStatusBar",
+    "DevTag",
+    "MockTagPublisher",
+    "GitHubTagPublisher",
     "summarize",
     "format_duration",
     "console_table",
+    "cost_summary",
     "render_html",
 ]

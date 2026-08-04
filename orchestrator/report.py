@@ -17,7 +17,40 @@ _STATUS_STYLE = {
 }
 
 
-def console_table(result: FleetResult | Iterable[AgentRun]) -> str:
+def cost_summary(
+    runs: list[AgentRun],
+    *,
+    cost_per_mtok: float,
+    fleet_size: int,
+) -> dict:
+    """Aggregate token usage and project cost to a larger fleet size."""
+    priced = [r for r in runs if r.total_tokens > 0]
+    total_tokens = sum(r.total_tokens for r in priced)
+    demo_cost = total_tokens / 1_000_000 * cost_per_mtok
+    avg = (total_tokens / len(priced)) if priced else 0.0
+    projected_tokens = avg * fleet_size
+    projected_cost = projected_tokens / 1_000_000 * cost_per_mtok
+    heaviest = max(priced, key=lambda r: r.total_tokens) if priced else None
+    return {
+        "total_tokens": total_tokens,
+        "demo_cost": demo_cost,
+        "avg_tokens": avg,
+        "fleet_size": fleet_size,
+        "projected_tokens": projected_tokens,
+        "projected_cost": projected_cost,
+        "cost_per_mtok": cost_per_mtok,
+        "heaviest_name": heaviest.target.name if heaviest else None,
+        "heaviest_tokens": heaviest.total_tokens if heaviest else 0,
+        "priced_repos": len(priced),
+    }
+
+
+def console_table(
+    result: FleetResult | Iterable[AgentRun],
+    *,
+    cost_per_mtok: Optional[float] = None,
+    fleet_size: Optional[int] = None,
+) -> str:
     if isinstance(result, FleetResult):
         runs = result.runs
         total_s = result.duration_s
@@ -34,15 +67,18 @@ def console_table(result: FleetResult | Iterable[AgentRun]) -> str:
             f"{'PASS' if c.passed else 'FAIL'}:{c.name}" for c in r.checks
         )
         dur = format_duration(r.duration_s)
-        rows.append(f"  {r.target.name:<22} {label:<13} {dur:>8}  {checks}")
+        toks = f"{r.total_tokens:>8,}" if r.total_tokens else f"{'—':>8}"
+        rows.append(
+            f"  {r.target.name:<22} {label:<13} {dur:>8} {toks}  {checks}"
+        )
     counts = summarize(list(runs))
-    header = f"  {'REPO':<22} {'STATUS':<13} {'TIME':>8}  GATES"
+    header = f"  {'REPO':<22} {'STATUS':<13} {'TIME':>8} {'TOKENS':>8}  GATES"
     footer = (
         f"  total={counts['total']}  done={counts.get('done',0)}  "
         f"needs_review={counts.get('needs_review',0)}  "
         f"blocked={counts.get('blocked',0)}  error={counts.get('error',0)}"
     )
-    lines = [header, "  " + "-" * 68, *rows, "  " + "-" * 68, footer]
+    lines = [header, "  " + "-" * 78, *rows, "  " + "-" * 78, footer]
     if waves:
         wave_bits = ", ".join(
             f"wave {w.index + 1}={format_duration(w.duration_s)}" for w in waves
@@ -50,6 +86,21 @@ def console_table(result: FleetResult | Iterable[AgentRun]) -> str:
         lines.append(f"  waves: {wave_bits}")
     if total_s is not None:
         lines.append(f"  elapsed: {format_duration(total_s)}")
+    if cost_per_mtok is not None and fleet_size is not None:
+        c = cost_summary(runs, cost_per_mtok=cost_per_mtok, fleet_size=fleet_size)
+        if c["priced_repos"]:
+            lines.append(
+                f"  tokens: {c['total_tokens']:,}  (~${c['demo_cost']:.2f} @ "
+                f"${c['cost_per_mtok']:.2f}/MTok)"
+            )
+            if c["heaviest_name"]:
+                lines.append(
+                    f"  heaviest: {c['heaviest_name']} ({c['heaviest_tokens']:,} tokens)"
+                )
+            lines.append(
+                f"  projected @ {c['fleet_size']} repos: "
+                f"~{c['projected_tokens']:,.0f} tokens / ${c['projected_cost']:.2f}"
+            )
     return "\n".join(lines)
 
 
@@ -76,6 +127,30 @@ def _card(r: AgentRun) -> str:
     )
     detail = html.escape(r.summary or r.error or "")
     dur = format_duration(r.duration_s)
+    tag = (
+        f'<div style="font-size:12px;color:#1a56db;margin:0 0 10px">'
+        f'cursor.dev · <code>{html.escape(r.dev_tag)}</code></div>'
+        if r.dev_tag
+        else ""
+    )
+    toks = (
+        f'<span style="color:#5f6368;white-space:nowrap">'
+        f'{r.total_tokens:,} tok</span>'
+        if r.total_tokens
+        else ""
+    )
+    arts = ""
+    if r.artifacts:
+        items = "".join(
+            f'<li style="margin:2px 0;color:#3c4043">'
+            f'<code style="font-size:12px">{html.escape(str(a.get("path") or "?"))}</code>'
+            f'</li>'
+            for a in r.artifacts[:5]
+        )
+        arts = (
+            f'<div style="font-size:12px;color:#5f6368;margin:0 0 4px">artifacts</div>'
+            f'<ul style="list-style:none;padding:0;margin:0 0 12px;font-size:12px">{items}</ul>'
+        )
     return f"""
     <div style="border:1px solid #e3e5e8;border-radius:12px;padding:18px 20px;background:#fff;
                 box-shadow:0 1px 2px rgba(0,0,0,.04)">
@@ -84,10 +159,15 @@ def _card(r: AgentRun) -> str:
         {_badge(r.status)}
       </div>
       <div style="color:#5f6368;font-size:13px;margin:6px 0 12px">{detail}</div>
+      {tag}
       <ul style="list-style:none;padding:0;margin:0 0 12px;font-size:13px">{checks}</ul>
+      {arts}
       <div style="display:flex;justify-content:space-between;gap:12px;font-size:13px;color:#3c4043">
         <div>PR: {pr}</div>
-        <div style="color:#5f6368;white-space:nowrap">⏱ {html.escape(dur)}</div>
+        <div style="display:flex;gap:12px;color:#5f6368;white-space:nowrap">
+          {toks}
+          <span>⏱ {html.escape(dur)}</span>
+        </div>
       </div>
     </div>"""
 
@@ -220,12 +300,58 @@ def _status_footer(runs: list[AgentRun], total_s: Optional[float]) -> str:
   </script>"""
 
 
+def _cost_banner(
+    runs: list[AgentRun],
+    *,
+    cost_per_mtok: Optional[float],
+    fleet_size: Optional[int],
+) -> str:
+    if cost_per_mtok is None or fleet_size is None:
+        return ""
+    c = cost_summary(runs, cost_per_mtok=cost_per_mtok, fleet_size=fleet_size)
+    if not c["priced_repos"]:
+        return ""
+    heavy = ""
+    if c["heaviest_name"]:
+        heavy = (
+            f'<div style="font-size:13px;color:#5f6368;margin-top:8px">'
+            f'Spend concentrates in <strong style="color:#202124">'
+            f'{html.escape(c["heaviest_name"])}</strong> '
+            f'({c["heaviest_tokens"]:,} tokens) — the gnarly repo drives cost.'
+            f'</div>'
+        )
+    return f"""
+    <div style="background:linear-gradient(135deg,#f0f4ff 0%,#fff 60%);border:1px solid #d7e0f5;
+                border-radius:12px;padding:18px 20px;margin-bottom:24px">
+      <div style="font-size:12px;color:#5f6368;text-transform:uppercase;letter-spacing:.05em;
+                  margin-bottom:10px">Cost · GET /v1/agents/{{id}}/usage</div>
+      <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:baseline">
+        <div>
+          <div style="font-size:28px;font-weight:700;color:#1a56db;letter-spacing:-0.02em">
+            {c["total_tokens"]:,}</div>
+          <div style="font-size:12px;color:#5f6368">tokens this run
+            · ~${c["demo_cost"]:.2f}</div>
+        </div>
+        <div style="color:#c0c4c9;font-size:22px">→</div>
+        <div>
+          <div style="font-size:28px;font-weight:700;color:#202124;letter-spacing:-0.02em">
+            ${c["projected_cost"]:.2f}</div>
+          <div style="font-size:12px;color:#5f6368">projected @ {c["fleet_size"]} repos
+            · ${c["cost_per_mtok"]:.2f}/MTok</div>
+        </div>
+      </div>
+      {heavy}
+    </div>"""
+
+
 def render_html(
     result: FleetResult | list[AgentRun],
     *,
     title: str,
     subtitle: str,
     waves: list[list[str]] | None = None,
+    cost_per_mtok: Optional[float] = None,
+    fleet_size: Optional[int] = None,
 ) -> str:
     if isinstance(result, FleetResult):
         runs = result.runs
@@ -240,6 +366,7 @@ def render_html(
     cards = "\n".join(_card(r) for r in runs)
     elapsed = format_duration(total_s) if total_s is not None else "—"
     footer = _status_footer(runs, total_s)
+    cost = _cost_banner(runs, cost_per_mtok=cost_per_mtok, fleet_size=fleet_size)
     stat = lambda n, k, c: (  # noqa: E731
         f'<div style="text-align:center"><div style="font-size:30px;font-weight:700;color:{c}">'
         f'{counts.get(k,0)}</div><div style="font-size:12px;color:#5f6368;text-transform:uppercase;'
@@ -266,6 +393,7 @@ def render_html(
     <h1 style="font-size:24px;margin:0 0 4px">{html.escape(title)}</h1>
     <div style="color:#5f6368;font-size:14px;margin-bottom:24px">{html.escape(subtitle)}</div>
     {_waves_strip(waves, wave_timings)}
+    {cost}
     <div style="display:flex;gap:32px;justify-content:space-around;background:#fff;border:1px solid #e3e5e8;
                 border-radius:12px;padding:20px;margin-bottom:24px">
       {stat("repos", "total", "#202124")}

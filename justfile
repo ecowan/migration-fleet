@@ -1,27 +1,36 @@
-# Migration Fleet — Cursor Cloud Agent orchestrator
-# List recipes: `just`
+# migration-fleet — orchestrate Cursor Cloud Agents across a repo fleet.
+# The orchestrator itself runs on the same tooling it migrates repos toward: uv + just.
 
-set shell := ["bash", "-euo", "pipefail", "-c"]
-
+# list recipes
 default:
     @just --list
 
-# Create/update .venv from the lockfile
-sync:
+# install dependencies into the uv-managed environment
+install:
     uv sync
 
-# Deterministic simulation (no API key, no credits)
-dry-run *args:
-    uv run python run.py --dry-run {{args}}
-
-# Live Cloud Agent fleet (needs CURSOR_API_KEY)
-live *args:
-    uv run python run.py --live {{args}}
-
-# Presentation narration over a dry-run
+# run the fleet in dry-run mode (no API key, no credits)
 demo:
     uv run python run.py --dry-run --verbose
 
-# Open the HTML dashboard
-report:
-    open fleet_report.html
+# run live (needs CURSOR_API_KEY + seeded GitHub repos); pass extra args through
+run *ARGS:
+    uv run python run.py {{ARGS}}
+
+# run the target-repo "before" test suites
+test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for r in common-utils risk-scoring notifications-svc payments-ledger; do
+        echo "== $r =="
+        ( cd targets/$r && python -m pytest -q )
+    done
+
+# regenerate the dependency lockfile
+lock:
+    uv lock
+
+# remove caches and generated artifacts
+clean:
+    find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    rm -f fleet_report.html

@@ -10,19 +10,26 @@
 # `flaky_repo` (dry-run only) forces one repo into NEEDS_REVIEW so both the human-
 # review AND the upstream-blocking stories are visible on stage.
 
-model: composer-2.5        # must match a model from GET /v0/models
+model: composer-2.5        # must match GET /v1/models (composer-2 is invalid)
 concurrency: 5             # max parallel agents WITHIN a wave (3 -> 300 knob)
 block_on_upstream: true    # don't migrate a consumer if its dependency isn't clean
 flaky_repo: risk-scoring   # dry-run only
+
+# Cost telemetry (from GET /v1/agents/{id}/usage). Rate is illustrative — swap for
+# your negotiated pricing. fleet_size drives the "projected cost across N repos".
+cost_per_mtok: 6.00        # $ per 1M tokens (blended, illustrative)
+fleet_size: 120            # real fleet size, for the projection
 
 repos:
   - name: common-utils          # shared library — no deps, migrates first
     url: https://github.com/ecowan/common-utils
     depends_on: []
+    publish_tag: true           # tag PR head as cursor.dev/<sha> for consumers
 
-  - name: risk-scoring          # imports common-utils
+  - name: risk-scoring          # imports common-utils; also a lib for payments
     url: https://github.com/ecowan/risk-scoring
     depends_on: [common-utils]
+    publish_tag: true
 
   - name: notifications-svc     # imports common-utils
     url: https://github.com/ecowan/notifications-svc

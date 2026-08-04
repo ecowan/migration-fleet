@@ -119,7 +119,15 @@ with ONE rehearsed extension you'll drive, and a backup. Always narrate the seam
 first: "that's a new gate / a playbook change / a concurrency change — here's
 where it plugs in."
 
-### PRIMARY (rehearse this one cold): add a compliance policy gate
+### PRIMARY OPTION A — coach a stuck agent with a follow-up run (v1)
+Reference + code: `extensions/repair_followup.py`. Tested — one follow-up run turns
+the needs-review repo green. This is the strongest match for "extend from a
+conversation," and it shows off the v1 durable-agent model (workspace persists
+across runs). Say: "triage doesn't have to end at needs-review — the v1 API lets me
+send the stuck agent one coaching follow-up in the same workspace." Then call
+`client.followup(agent_id, PYDANTIC_FIX)` and re-check → green.
+
+### PRIMARY OPTION B — add a compliance policy gate
 Reference + exact code: `extensions/policy_gate.py`. It's tested — wiring it makes
 `risk-scoring` fail a *security* gate too.
 
@@ -137,7 +145,7 @@ def no_known_cves_gate(poll):
 
 DEFAULT_GATES.append(no_known_cves_gate)   # at the bottom of the file
 ```
-Then `just dry-run` — new column across the fleet; risk-scoring lights
+Then `python run.py --dry-run` — new column across the fleet; risk-scoring lights
 up red on security. Land it: "one function, and every repo in the fleet is now
 checked against that policy. That's the leverage."
 

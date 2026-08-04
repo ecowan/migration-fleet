@@ -3,7 +3,7 @@
 THE LIVE MOVE (what you type on stage):
   1. paste `no_known_cves_gate` below into orchestrator/gates.py
   2. append it to DEFAULT_GATES
-  3. re-run `just dry-run`
+  3. re-run `python run.py --dry-run`
 
 That's it — the new gate shows up as a column across the whole fleet, and
 risk-scoring (which couldn't drop its old pins) now fails a *security* gate too.

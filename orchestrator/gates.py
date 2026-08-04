@@ -45,5 +45,39 @@ def tests_green_gate(poll: dict[str, Any]) -> CheckResult:
     )
 
 
+def make_upstream_pins_gate(required_tags: dict[str, str]) -> Gate:
+    """Require the agent to have pinned each upstream `cursor.dev/…` tag.
+
+    `required_tags` maps package name → tag ref (e.g. common-utils → cursor.dev/abc1234).
+    """
+    def upstream_pins_gate(poll: dict[str, Any]) -> CheckResult:
+        if not required_tags:
+            return CheckResult("upstream_pins", True, "no upstream fleet pins required")
+        blob = " ".join(
+            [
+                poll.get("summary") or "",
+                str(poll.get("raw") or {}),
+            ]
+        )
+        missing = [
+            f"{name}@{tag}"
+            for name, tag in required_tags.items()
+            if tag not in blob
+        ]
+        if missing:
+            return CheckResult(
+                "upstream_pins",
+                False,
+                "missing pin(s): " + ", ".join(missing),
+            )
+        return CheckResult(
+            "upstream_pins",
+            True,
+            "pinned " + ", ".join(f"{n}@{t}" for n, t in required_tags.items()),
+        )
+
+    return upstream_pins_gate
+
+
 # Default gate set. Order is display order.
 DEFAULT_GATES: list[Gate] = [pr_opened_gate, deps_resolved_gate, tests_green_gate]

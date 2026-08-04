@@ -65,21 +65,23 @@ detected and flagged for a human instead of hanging the run.
 
 ## Run it
 
-Requires [uv](https://docs.astral.sh/uv/) and [just](https://github.com/casey/just).
+The orchestrator runs on the same tooling it migrates repos *toward* — `uv` + `just`:
 
 ```bash
-just sync          # create .venv from the lockfile
-just dry-run       # deterministic simulation (no API key)
-just dry-run -- --verbose   # presentation narration
-just report        # open fleet_report.html
+just install          # uv sync
+just demo             # dry run: no API key, no credits
+open fleet_report.html
 ```
 
 Live run:
 
 ```bash
-export CURSOR_API_KEY=key_...              # Cursor integration API key
-just live -- --environment <env-id>
+export CURSOR_API_KEY=key_...              # Cursor API key (Basic auth)
+just run --live --environment <env-id>     # or: uv run python run.py --live ...
 ```
+
+`just --list` shows every recipe (`install`, `demo`, `run`, `test`, `lock`, `clean`).
+No `uv`? A `requirements.txt` is still provided: `pip install -r requirements.txt && python run.py --dry-run`.
 
 For a live run, first **seed the demo repos on GitHub** (push the folders under
 `targets/` to real repos your key can access) and point `repos.yaml` `url`s at

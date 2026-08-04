@@ -32,6 +32,8 @@ class RepoTarget:
     # Names of repos this one imports. Populated from the dependency-matrix skill.
     # Semantics: every name listed here must migrate BEFORE this repo.
     depends_on: list[str] = field(default_factory=list)
+    # After DONE, tag the PR head as cursor.dev/<sha> for downstream git pins.
+    publish_tag: bool = False
 
 
 @dataclass
@@ -54,10 +56,22 @@ class AgentRun:
     error: Optional[str] = None
     # Wall time from launch (or block decision) through terminal status.
     duration_s: Optional[float] = None
+    # Published cursor.dev/<sha> tag (libs with publish_tag=True).
+    dev_tag: Optional[str] = None
+    # Token usage from GET /v1/agents/{id}/usage (totalUsage shape).
+    usage: Optional[dict] = None
+    # Artifact metadata from GET /v1/agents/{id}/artifacts.
+    artifacts: list[dict] = field(default_factory=list)
 
     @property
     def gates_passed(self) -> bool:
         return all(c.passed for c in self.checks)
+
+    @property
+    def total_tokens(self) -> int:
+        if not self.usage:
+            return 0
+        return int(self.usage.get("totalTokens") or 0)
 
 
 @dataclass

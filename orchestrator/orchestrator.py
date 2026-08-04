@@ -8,6 +8,7 @@ Design seams (useful for the live-extension segment):
   * `gates`  -> add/remove verification without touching the run loop
   * `client` -> swap Mock for REST without touching anything else
   * `concurrency` -> one knob for "run 3" vs "run 300"
+  * `tag_publisher` -> after a lib is DONE, publish cursor.dev/<sha> for consumers
 """
 from __future__ import annotations
 
@@ -16,12 +17,16 @@ import time
 from typing import Callable, Optional
 
 from .cursor_client import CursorClient
-from .gates import DEFAULT_GATES, Gate
+from .gates import DEFAULT_GATES, Gate, make_upstream_pins_gate
 from .models import AgentRun, FleetResult, RepoTarget, Status, WaveTiming
+from .retries import is_retryable_error
 from .scheduler import Schedule, Wave
+from .tags import DevTag, TagPublisher, render_pins_prompt
 
 ProgressFn = Callable[[AgentRun], None]
 WaveFn = Callable[[Wave, list[RepoTarget], list[AgentRun]], None]
+# Step narration for --verbose: (repo_name, message) -> None
+StepFn = Callable[[str, str], None]
 
 
 class FleetOrchestrator:
@@ -35,8 +40,12 @@ class FleetOrchestrator:
         concurrency: int = 5,
         poll_interval: float = 2.0,
         max_polls: int = 300,
+        wave_retries: int = 2,
+        wave_retry_delay: float = 5.0,
+        tag_publisher: Optional[TagPublisher] = None,
         on_progress: Optional[ProgressFn] = None,
         on_wave: Optional[WaveFn] = None,
+        on_step: Optional[StepFn] = None,
     ):
         self._client = client
         self._prompt = prompt
@@ -45,28 +54,95 @@ class FleetOrchestrator:
         self._sem = asyncio.Semaphore(concurrency)
         self._poll_interval = poll_interval
         self._max_polls = max_polls
+        self._wave_retries = wave_retries
+        self._wave_retry_delay = wave_retry_delay
+        self._tag_publisher = tag_publisher
+        self._fleet_tags: dict[str, DevTag] = {}
         self._on_progress = on_progress or (lambda run: None)
         self._on_wave = on_wave
+        self._on_step = on_step or (lambda _repo, _msg: None)
+
+    @property
+    def fleet_tags(self) -> dict[str, DevTag]:
+        return dict(self._fleet_tags)
+
+    def _step(self, repo: str, message: str) -> None:
+        self._on_step(repo, message)
+
+    def _prompt_for(self, target: RepoTarget) -> tuple[str, dict[str, str]]:
+        """Base playbook + required upstream cursor.dev pins for this repo."""
+        required = {
+            name: self._fleet_tags[name].tag
+            for name in target.depends_on
+            if name in self._fleet_tags
+        }
+        pins = {name: self._fleet_tags[name] for name in required}
+        return self._prompt + render_pins_prompt(pins), required
 
     async def run_one(self, target: RepoTarget) -> AgentRun:
         run = AgentRun(target=target)
+        name = target.name
         t0 = time.perf_counter()
+        prompt, required_pins = self._prompt_for(target)
+        gates = list(self._gates)
+        if required_pins:
+            gates.append(make_upstream_pins_gate(required_pins))
+            self._step(
+                name,
+                "upstream pins required: "
+                + ", ".join(f"{n}@{t}" for n, t in required_pins.items()),
+            )
+
+        self._step(name, "waiting for a concurrency slot…")
         async with self._sem:
             try:
-                run.agent_id = await self._client.launch(target, self._prompt, self._model)
+                self._step(
+                    name,
+                    f"POST /agents — launching Cloud Agent"
+                    + (f" (model {self._model})" if self._model else ""),
+                )
+                self._step(name, f"repository {target.url} @ {target.ref}")
+                run.agent_id = await self._client.launch(target, prompt, self._model)
+                self._step(name, f"agent created → {run.agent_id}")
                 run.status = Status.RUNNING
                 self._on_progress(run)
 
                 poll = None
-                for _ in range(self._max_polls):
+                for attempt in range(1, self._max_polls + 1):
+                    self._step(
+                        name,
+                        f"poll {attempt}/{self._max_polls} — GET agent run status…",
+                    )
                     poll = await self._client.poll(run.agent_id)
+                    agent_status = (
+                        poll.get("status")
+                        or str((poll.get("raw") or {}).get("status") or "?")
+                    )
+                    elapsed = format_duration(time.perf_counter() - t0)
                     if poll["done"]:
+                        outcome = "succeeded" if poll["ok"] else "failed"
+                        self._step(
+                            name,
+                            f"poll {attempt}: status={agent_status} → {outcome} "
+                            f"(elapsed {elapsed})",
+                        )
                         break
+                    self._step(
+                        name,
+                        f"poll {attempt}: status={agent_status} — still working "
+                        f"(elapsed {elapsed}; next check in {self._poll_interval:g}s)",
+                    )
                     await asyncio.sleep(self._poll_interval)
 
                 if poll is None or not poll["done"]:
                     run.status = Status.ERROR
                     run.error = "timed out waiting for agent"
+                    self._step(
+                        name,
+                        f"gave up after {self._max_polls} polls — cancelling active run",
+                    )
+                    await self._cancel_quiet(run)
+                    await self._enrich(run)
                     run.duration_s = time.perf_counter() - t0
                     self._on_progress(run)
                     return run
@@ -74,6 +150,8 @@ class FleetOrchestrator:
                 if not poll["ok"]:
                     run.status = Status.ERROR
                     run.error = poll.get("summary") or "agent reported failure"
+                    self._step(name, f"agent reported failure: {run.error}")
+                    await self._enrich(run)
                     run.duration_s = time.perf_counter() - t0
                     self._on_progress(run)
                     return run
@@ -81,16 +159,92 @@ class FleetOrchestrator:
                 # Agent finished -> record result and run gates.
                 run.pr_url = poll.get("pr_url")
                 run.summary = poll.get("summary", "")
-                run.checks = [gate(poll) for gate in self._gates]
+                self._step(name, "agent finished — running verification gates")
+                if run.pr_url:
+                    self._step(name, f"PR url: {run.pr_url}")
+                else:
+                    self._step(name, "PR url: (none yet)")
+                run.checks = []
+                for gate in gates:
+                    check = gate(poll)
+                    run.checks.append(check)
+                    mark = "PASS" if check.passed else "FAIL"
+                    detail = f" — {check.detail}" if check.detail else ""
+                    self._step(name, f"gate {check.name}: {mark}{detail}")
                 run.status = Status.DONE if run.gates_passed else Status.NEEDS_REVIEW
+                self._step(name, f"classified → {run.status.value}")
+                await self._enrich(run)
+
+                # Libs: publish cursor.dev/<sha> on the PR head for downstream pins.
+                if (
+                    run.status is Status.DONE
+                    and target.publish_tag
+                    and self._tag_publisher
+                    and run.pr_url
+                ):
+                    self._step(name, "publishing cursor.dev tag on PR head…")
+                    try:
+                        dev = await self._tag_publisher.publish(
+                            name=target.name, url=target.url, pr_url=run.pr_url
+                        )
+                        self._fleet_tags[target.name] = dev
+                        run.dev_tag = dev.tag
+                        self._step(
+                            name,
+                            f"tagged {dev.tag} ({dev.pep440}) → {dev.git_dep}",
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        run.status = Status.ERROR
+                        run.error = f"tag publish failed: {type(exc).__name__}: {exc}"
+                        self._step(name, run.error)
 
             except Exception as exc:  # noqa: BLE001 - surface any failure per-repo
                 run.status = Status.ERROR
                 run.error = f"{type(exc).__name__}: {exc}"
+                self._step(name, f"exception: {run.error}")
+                await self._enrich(run)
 
         run.duration_s = time.perf_counter() - t0
         self._on_progress(run)
         return run
+
+    async def _cancel_quiet(self, run: AgentRun) -> None:
+        if not run.agent_id:
+            return
+        try:
+            await self._client.cancel(run.agent_id)
+            self._step(run.target.name, f"cancelled run on {run.agent_id}")
+        except Exception as exc:  # noqa: BLE001
+            self._step(
+                run.target.name,
+                f"cancel failed ({type(exc).__name__}: {exc}) — leaving for dashboard",
+            )
+
+    async def _enrich(self, run: AgentRun) -> None:
+        """Pull usage + artifacts once the agent is terminal (best-effort)."""
+        if not run.agent_id:
+            return
+        name = run.target.name
+        try:
+            self._step(name, f"GET /agents/{run.agent_id}/usage — token telemetry")
+            run.usage = await self._client.usage(run.agent_id)
+            toks = run.total_tokens
+            self._step(name, f"usage → {toks:,} tokens")
+        except Exception as exc:  # noqa: BLE001
+            self._step(name, f"usage unavailable: {type(exc).__name__}: {exc}")
+        try:
+            self._step(name, f"GET /agents/{run.agent_id}/artifacts — listing outputs")
+            run.artifacts = await self._client.list_artifacts(run.agent_id)
+            if run.artifacts:
+                paths = ", ".join(
+                    str(a.get("path") or "?") for a in run.artifacts[:4]
+                )
+                more = f" (+{len(run.artifacts) - 4})" if len(run.artifacts) > 4 else ""
+                self._step(name, f"artifacts → {paths}{more}")
+            else:
+                self._step(name, "artifacts → (none)")
+        except Exception as exc:  # noqa: BLE001
+            self._step(name, f"artifacts unavailable: {type(exc).__name__}: {exc}")
 
     async def run(self, targets: list[RepoTarget]) -> FleetResult:
         t0 = time.perf_counter()
@@ -117,11 +271,22 @@ class FleetOrchestrator:
                     d for d in repo.depends_on
                     if d in results and results[d].status is not Status.DONE
                 ]
-                if block_on_upstream and bad:
+                # Consumers that need a fleet tag also wait until it exists.
+                missing_tags = [
+                    d for d in repo.depends_on
+                    if d not in self._fleet_tags
+                    and d in results
+                    and results[d].target.publish_tag
+                    and results[d].status is Status.DONE
+                ]
+                # If upstream was DONE but tag missing, treat as unclean.
+                # (publish_tag failure already flips status to ERROR above.)
+                if block_on_upstream and (bad or missing_tags):
+                    why = bad or missing_tags
                     run = AgentRun(
                         target=repo,
                         status=Status.BLOCKED,
-                        error=f"upstream not clean: {', '.join(bad)}",
+                        error=f"upstream not clean: {', '.join(why)}",
                         duration_s=0.0,
                     )
                     results[repo.name] = run
@@ -132,16 +297,64 @@ class FleetOrchestrator:
             if self._on_wave:
                 self._on_wave(wave, runnable, blocked)
             for run in blocked:
+                self._step(
+                    run.target.name,
+                    f"skipped — {run.error}",
+                )
                 self._on_progress(run)
 
+            if runnable:
+                self._step(
+                    "*",
+                    f"wave {wave.index + 1}: starting "
+                    + ", ".join(r.name for r in runnable),
+                )
+                if self._fleet_tags:
+                    self._step(
+                        "*",
+                        "fleet tags available: "
+                        + ", ".join(
+                            f"{n}@{t.tag}" for n, t in self._fleet_tags.items()
+                        ),
+                    )
             wave_runs = await asyncio.gather(*(self.run_one(r) for r in runnable))
             for run in wave_runs:
                 results[run.target.name] = run
 
+            # Re-queue repos that died on transient API errors (429/5xx/timeout)
+            # before we let block_on_upstream freeze their consumers.
+            for pass_i in range(1, self._wave_retries + 1):
+                retryable = [
+                    r for r in wave_runs
+                    if r.status is Status.ERROR and is_retryable_error(r.error)
+                ]
+                if not retryable:
+                    break
+                names = ", ".join(r.target.name for r in retryable)
+                self._step(
+                    "*",
+                    f"wave {wave.index + 1}: transient API error on {names} — "
+                    f"retry pass {pass_i}/{self._wave_retries} "
+                    f"in {self._wave_retry_delay:g}s",
+                )
+                await asyncio.sleep(self._wave_retry_delay)
+                retried = await asyncio.gather(
+                    *(self.run_one(r.target) for r in retryable)
+                )
+                by_name = {r.target.name: r for r in retried}
+                wave_runs = [by_name.get(r.target.name, r) for r in wave_runs]
+                for run in retried:
+                    results[run.target.name] = run
+
+            wave_dur = time.perf_counter() - wave_t0
+            self._step(
+                "*",
+                f"wave {wave.index + 1} complete in {format_duration(wave_dur)}",
+            )
             wave_timings.append(
                 WaveTiming(
                     index=wave.index,
-                    duration_s=time.perf_counter() - wave_t0,
+                    duration_s=wave_dur,
                     repo_names=[r.name for r in wave.repos],
                 )
             )
