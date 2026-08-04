@@ -1,0 +1,76 @@
+"""Core data types shared across the orchestrator.
+
+Kept deliberately small and framework-free so the shapes are easy to reason
+about in a demo and easy to extend live (add a field, add a check).
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+
+
+class Status(str, Enum):
+    PENDING = "pending"        # created locally, not yet launched
+    RUNNING = "running"        # agent working in its cloud VM
+    NEEDS_REVIEW = "needs_review"  # finished but a gate failed / human decision needed
+    DONE = "done"              # finished, all gates green, PR open
+    BLOCKED = "blocked"        # not launched: an upstream dependency isn't clean
+    ERROR = "error"            # agent or API failure
+
+
+# Terminal states that stop polling.
+TERMINAL = {Status.NEEDS_REVIEW, Status.DONE, Status.BLOCKED, Status.ERROR}
+
+
+@dataclass
+class RepoTarget:
+    """One repo in the migration fleet."""
+    name: str
+    url: str
+    ref: str = "main"
+    # Names of repos this one imports. Populated from the dependency-matrix skill.
+    # Semantics: every name listed here must migrate BEFORE this repo.
+    depends_on: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CheckResult:
+    """Outcome of one verification gate run against the agent's result."""
+    name: str
+    passed: bool
+    detail: str = ""
+
+
+@dataclass
+class AgentRun:
+    """The full lifecycle record for one repo's migration agent."""
+    target: RepoTarget
+    agent_id: Optional[str] = None
+    status: Status = Status.PENDING
+    pr_url: Optional[str] = None
+    summary: str = ""
+    checks: list[CheckResult] = field(default_factory=list)
+    error: Optional[str] = None
+    # Wall time from launch (or block decision) through terminal status.
+    duration_s: Optional[float] = None
+
+    @property
+    def gates_passed(self) -> bool:
+        return all(c.passed for c in self.checks)
+
+
+@dataclass
+class WaveTiming:
+    """Wall time for one dependency wave (parallel repos share this span)."""
+    index: int
+    duration_s: float
+    repo_names: list[str] = field(default_factory=list)
+
+
+@dataclass
+class FleetResult:
+    """Runs plus timing for the full scheduled fleet process."""
+    runs: list[AgentRun]
+    duration_s: float
+    waves: list[WaveTiming] = field(default_factory=list)

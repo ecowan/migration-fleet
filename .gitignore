@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.python-version.bak
+.cursor_api_key
+live_fleet_run.log
+fleet_report.html
+.DS_Store
+
+# Seeded demo target repos (separate GitHub remotes; not part of this project)
+targets/

@@ -1,0 +1,33 @@
+# The migration fleet manifest.
+#
+# For the demo these point at the synthetic repos under ./targets. For a live
+# run, replace `url` with the GitHub URLs of your seeded demo repos.
+#
+# `depends_on` is populated by the dependency-matrix skill (X imports Y imports Z).
+# The scheduler topologically sorts these into migration waves so a shared library
+# migrates and verifies BEFORE the services that import it.
+#
+# `flaky_repo` (dry-run only) forces one repo into NEEDS_REVIEW so both the human-
+# review AND the upstream-blocking stories are visible on stage.
+
+model: composer-2.5        # must match a model from GET /v0/models
+concurrency: 5             # max parallel agents WITHIN a wave (3 -> 300 knob)
+block_on_upstream: true    # don't migrate a consumer if its dependency isn't clean
+flaky_repo: risk-scoring   # dry-run only
+
+repos:
+  - name: common-utils          # shared library — no deps, migrates first
+    url: https://github.com/ecowan/common-utils
+    depends_on: []
+
+  - name: risk-scoring          # imports common-utils
+    url: https://github.com/ecowan/risk-scoring
+    depends_on: [common-utils]
+
+  - name: notifications-svc     # imports common-utils
+    url: https://github.com/ecowan/notifications-svc
+    depends_on: [common-utils]
+
+  - name: payments-ledger       # imports common-utils AND risk-scoring
+    url: https://github.com/ecowan/payments-ledger
+    depends_on: [common-utils, risk-scoring]
