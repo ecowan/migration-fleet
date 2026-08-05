@@ -23,13 +23,19 @@ map *ARGS:
     uv run python -m orchestrator.fleet_map {{ARGS}}
 
 # run the target-repo "before" test suites
+# uses `uv run` like every other recipe — a bare `python` is not on PATH on macOS
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     for r in common-utils risk-scoring notifications-svc payments-ledger; do
         echo "== $r =="
-        ( cd targets/$r && python -m pytest -q )
+        ( cd targets/$r && uv run python -m pytest -q )
     done
+
+# run ONE target repo's tests — this is the §8 demo beat
+# usage: just test-one risk-scoring
+test-one REPO="risk-scoring":
+    cd targets/{{REPO}} && uv run python -m pytest -q
 
 # regenerate the dependency lockfile
 lock:
