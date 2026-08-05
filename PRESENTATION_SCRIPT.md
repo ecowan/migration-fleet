@@ -28,7 +28,9 @@ Pre-flight (before you share screen):
   PR detail page pre-loaded — refreshing an empty list into a real PR in front of
   the room is the whole point.
 - `fleet_report.html` **closed.** This run overwrites it. If you leave a tab open
-  from a rehearsal you will show stale numbers; open it fresh in §9.
+  from a rehearsal you will show stale numbers; open it fresh in §9. (A dry run
+  can no longer clobber it — `--dry-run` writes `fleet_report.dry-run.html`
+  instead — so anything at `fleet_report.html` is real. It may still be *old*.)
 - Mic + screen-share tested. Editor and terminal fonts bumped for a projector.
 
 **This is a live run** — `just run --live --verbose`, real Cloud Agents, real
@@ -473,6 +475,11 @@ and they *really* don't forgive finding out the "live" run was a recording.
 > Open it *now*, don't switch to a tab you had open. The room should see the file
 > the run just wrote. If you have a stale tab from rehearsal, you'll show last
 > night's numbers and the whole live-only premise dies on the spot.
+>
+> The PR links in here are clickable and **real** — they come straight from the
+> agents' API responses. Clicking one is a good optional beat. (Dry-run reports
+> fabricate PR numbers that 404, which is why they now write to a separate
+> `fleet_report.dry-run.html`.)
 
 Here's the whole campaign in one view — this file did not exist four minutes ago.
 Wave order across the top, one card per repo.
@@ -740,15 +747,14 @@ you've said it.
 You'll rehearse this live more than once, and a dirty starting state is the most
 likely way to look bad. Before each run:
 
-- **Close open PRs and delete the branches** from the previous run — otherwise
-  §8's "refresh the empty list" moment shows yesterday's PRs sitting there, and
-  agents may behave differently against an existing branch.
-- **Delete the `0.0.1.dev0` fleet tags** — if the tag already exists, the wave-one
-  tagging beat is a no-op and §8's coordination story has nothing to point at.
-- **`rm fleet_report.html fleet_usage.json`** (or `just clean`) so §9's "this file
-  did not exist four minutes ago" is literally true.
+- **`just close-prs`** — closes every open PR, deletes the head branches, and
+  deletes the `0.0.1.dev0` fleet tags across all four repos. Both matter: stale
+  PRs break §8's "refresh the empty list" moment, and an existing tag makes the
+  wave-one tagging beat a silent no-op with nothing to point at.
+- **`just clean`** so §9's "this file did not exist four minutes ago" is literally
+  true. (It removes both the live and the `.dry-run` artifacts.)
 - **Revert the target repos to their pre-migration state** on `main`.
 
-Worth scripting as a `just reset-demo` recipe rather than doing by hand under time
-pressure — forgetting one of these mid-rehearsal is cheap, forgetting one on stage
-is not.
+The last step is still manual — worth folding into a `just reset-demo` alongside
+the other two rather than doing it by hand under time pressure. Forgetting one of
+these mid-rehearsal is cheap; forgetting one on stage is not.

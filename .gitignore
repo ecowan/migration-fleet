@@ -7,6 +7,8 @@ __pycache__/
 live_fleet_run.log
 fleet_report.html
 fleet_usage.json
+fleet_report.dry-run.html
+fleet_usage.dry-run.json
 .DS_Store
 
 # Seeded demo target repos (separate GitHub remotes; not part of this project)

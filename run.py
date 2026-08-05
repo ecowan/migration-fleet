@@ -12,7 +12,8 @@ Presentation narration (wave banners, gate detail, PR links):
     just dry-run -- --verbose
     # or: just demo
 
-Writes an HTML dashboard (default: fleet_report.html) and prints a console table.
+Writes an HTML dashboard (fleet_report.html; fleet_report.dry-run.html under
+--dry-run, so a simulated run can't overwrite a real one) and a console table.
 While a run is in progress, a sticky bottom status bar shows a progress bar and
 a live elapsed-time counter.
 """
@@ -191,12 +192,19 @@ async def main() -> int:
         help="local checkouts used to build the dependency matrix",
     )
     ap.add_argument("--environment", default=None, help="Cursor custom environment id (live)")
-    ap.add_argument("--out", type=Path, default=HERE / "fleet_report.html")
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="dashboard path (default: fleet_report.html, "
+             "or fleet_report.dry-run.html under --dry-run)",
+    )
     ap.add_argument(
         "--usage-out",
         type=Path,
-        default=HERE / "fleet_usage.json",
-        help="per-bucket token usage sidecar (raw API response preserved)",
+        default=None,
+        help="per-bucket token usage sidecar (raw API response preserved); "
+             "default: fleet_usage.json, or fleet_usage.dry-run.json under --dry-run",
     )
     ap.add_argument(
         "-v", "--verbose",
@@ -209,6 +217,16 @@ async def main() -> int:
         help="pick model per repo from LOC/complexity (see routing: in repos.yaml)",
     )
     args = ap.parse_args()
+
+    # A dry run writes to its own filenames. The mock fabricates PR urls
+    # (`<repo>/pull/40+n`) that 404 against the real repos, so a simulated
+    # dashboard must never overwrite the one a live run produced. An explicit
+    # --out/--usage-out still wins.
+    suffix = ".dry-run" if args.dry_run else ""
+    if args.out is None:
+        args.out = HERE / f"fleet_report{suffix}.html"
+    if args.usage_out is None:
+        args.usage_out = HERE / f"fleet_usage{suffix}.json"
 
     cfg = load_config(args.config)
     playbook = load_playbook(args.playbook)

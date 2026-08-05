@@ -72,8 +72,13 @@ The orchestrator runs on the same tooling it migrates repos *toward* — `uv` + 
 ```bash
 just install          # uv sync
 just demo             # dry run: no API key, no credits
-open fleet_report.html
+open fleet_report.dry-run.html
 ```
+
+A dry run writes `fleet_report.dry-run.html` / `fleet_usage.dry-run.json`; only a
+live run writes `fleet_report.html`. The mock fabricates PR urls that 404 against
+the real repos, so keeping the two apart means anything at `fleet_report.html` has
+real, clickable links.
 
 Live run:
 

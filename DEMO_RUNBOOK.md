@@ -27,8 +27,8 @@ The hero capabilities are the ones dep bots don't have: structural re-tooling
    pin) so the NEEDS_REVIEW outcome is a property of the repo, not a dry-run
    injection. `flaky_repo` in `repos.yaml` does nothing on a live run.
 3. **Rehearse live end-to-end at least twice**, with a timer, resetting state
-   between runs (close PRs, delete branches + `0.0.1.dev0` tags, remove
-   `fleet_report.html`). Confirm the mix is 2 DONE · 1 NEEDS_REVIEW · 1 BLOCKED
+   between runs (`just close-prs` handles PRs, branches and the `0.0.1.dev0` tags;
+   then `just clean`). Confirm the mix is 2 DONE · 1 NEEDS_REVIEW · 1 BLOCKED
    both times, and record the real wall-clock time at which wave one's PR appears —
    §8's back half is anchored to it.
 4. Do the optional prep call — ask about environment setup and any REST rate limits.
