@@ -17,6 +17,11 @@ demo:
 run *ARGS:
     uv run python run.py {{ARGS}}
 
+# dependency map + merge waves + latest GitHub tags/PRs (tables + digraphs)
+# uses GITHUB_TOKEN or `gh auth token`; pass --offline to skip remote
+map *ARGS:
+    uv run python -m orchestrator.fleet_map {{ARGS}}
+
 # run the target-repo "before" test suites
 test:
     #!/usr/bin/env bash

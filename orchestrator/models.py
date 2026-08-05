@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 
@@ -35,6 +36,7 @@ class RepoTarget:
     depends_on: list[str] = field(default_factory=list)
     # After DONE, tag the PR head as 0.0.1.dev0 for downstream version pins.
     publish_tag: bool = False
+    root: Path = field(default_factory=Path.cwd)
 
 
 @dataclass
@@ -55,6 +57,8 @@ class AgentRun:
     summary: str = ""
     checks: list[CheckResult] = field(default_factory=list)
     error: Optional[str] = None
+    # Model id used for launch (router pick, or fleet-wide default).
+    model: Optional[str] = None
     # Wall time from launch (or block decision) through terminal status.
     duration_s: Optional[float] = None
     # Published fleet pin, e.g. common-utils@0.0.1.dev0 (libs with publish_tag=True).

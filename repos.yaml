@@ -15,6 +15,18 @@ concurrency: 5             # max parallel agents WITHIN a wave (3 -> 300 knob)
 block_on_upstream: true    # don't migrate a consumer if its dependency isn't clean
 flaky_repo: risk-scoring   # dry-run only
 
+# Optional per-repo model routing (or pass --route-models). Scores LOC, breaking
+# pins (e.g. pydantic 1.x), in-fleet dependents, publish_tag, and upstream count.
+# Until you have distinct model ids, all tiers can point at the same model — the
+# score table still shows up for the demo narrative.
+# routing:
+#   enabled: true
+#   easy: composer-2.5
+#   mid: composer-2.5
+#   hard: composer-2.5
+#   easy_max: 3
+#   mid_max: 7
+
 # Cost telemetry: GET /v1/agents/{id}/usage → four token buckets → $/MTok rates.
 # Published composer-2.5 rates (per 1M tokens):
 #   standard  $0.50 in / $0.20 cache read / $2.50 out

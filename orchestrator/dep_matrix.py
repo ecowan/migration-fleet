@@ -66,7 +66,7 @@ class DepMatrix:
         out = []
         for t in targets:
             deps = list(self.depends_on.get(t.name, []))
-            out.append(replace(t, depends_on=deps))
+            out.append(replace(t, depends_on=deps))  # preserves root, publish_tag, …
         return out
 
 

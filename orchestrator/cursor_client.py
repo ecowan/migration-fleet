@@ -378,13 +378,19 @@ class MockCursorClient(CursorClient):
         }
 
     async def usage(self, agent_id: str) -> dict[str, Any]:
+        """Fabricate token buckets for dry-run — never hits the real usage API."""
         st = self._state[agent_id]
         name = st["target"].name
-        base = 18_000 + (sum(ord(c) for c in name) % 12) * 1_500
+        # Deterministic "hash" of the repo name → 0..11, so each repo gets a
+        # different spend figure but the same repo is stable across dry-runs.
+        # (sum of character codes; not cryptographic, just variety on stage.)
+        jitter = (sum(ord(c) for c in name) % 12) * 1_500
+        base = 18_000 + jitter  # input-token seed; other buckets scale from this
         if self._flaky_repo and name == self._flaky_repo:
-            base *= 3          # the gnarly repo burns more tokens (retries on the pin)
+            base *= 3  # gnarly repo burns more (retries on the pin)
         if st.get("repaired"):
-            base = int(base * 1.35)  # follow-up run adds usage
+            base = int(base * 1.35)  # coaching follow-up adds another run's usage
+        # Rough live-ish ratios: output << input; cache write/read dominate total.
         inp, out = base, base // 4
         cw, cr = base * 2, base * 3
         # Match live GET /v1/agents/{id}/usage shape: buckets live under totalUsage.

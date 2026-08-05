@@ -16,6 +16,8 @@ import asyncio
 import time
 from typing import Callable, Optional
 
+from orchestrator.router import Router
+
 from .cursor_client import CursorClient
 from .gates import DEFAULT_GATES, Gate, make_upstream_pins_gate
 from .models import AgentRun, FleetResult, RepoTarget, Status, WaveTiming
@@ -43,6 +45,7 @@ class FleetOrchestrator:
         wave_retries: int = 2,
         wave_retry_delay: float = 5.0,
         tag_publisher: Optional[TagPublisher] = None,
+        router: Optional[Router] = None,
         on_progress: Optional[ProgressFn] = None,
         on_wave: Optional[WaveFn] = None,
         on_step: Optional[StepFn] = None,
@@ -50,6 +53,7 @@ class FleetOrchestrator:
         self._client = client
         self._prompt = prompt
         self._model = model
+        self._router = router
         self._gates = gates if gates is not None else list(DEFAULT_GATES)
         self._sem = asyncio.Semaphore(concurrency)
         self._poll_interval = poll_interval
@@ -79,6 +83,12 @@ class FleetOrchestrator:
         pins = {name: self._fleet_tags[name] for name in required}
         return self._prompt + render_pins_prompt(pins), required
 
+    def _model_for(self, target: RepoTarget) -> Optional[str]:
+        """Per-repo model from the optional router; else the fleet-wide default."""
+        if self._router is not None:
+            return self._router.route(target)
+        return self._model
+
     async def run_one(self, target: RepoTarget) -> AgentRun:
         run = AgentRun(target=target)
         name = target.name
@@ -93,16 +103,26 @@ class FleetOrchestrator:
                 + ", ".join(f"{n}@{t}" for n, t in required_pins.items()),
             )
 
+        model = self._model_for(target)
+        run.model = model
+        if self._router is not None:
+            c = self._router.assess(target)
+            self._step(
+                name,
+                f"router score={c.score} → model {model}"
+                + (f" ({', '.join(c.reasons)})" if c.reasons else ""),
+            )
+
         self._step(name, "waiting for a concurrency slot…")
         async with self._sem:
             try:
                 self._step(
                     name,
                     f"POST /agents — launching Cloud Agent"
-                    + (f" (model {self._model})" if self._model else ""),
+                    + (f" (model {model})" if model else ""),
                 )
                 self._step(name, f"repository {target.url} @ {target.ref}")
-                run.agent_id = await self._client.launch(target, prompt, self._model)
+                run.agent_id = await self._client.launch(target, prompt, model)
                 self._step(name, f"agent created → {run.agent_id}")
                 run.status = Status.RUNNING
                 self._on_progress(run)

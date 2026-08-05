@@ -8,6 +8,7 @@ from .tags import DevTag, GitHubTagPublisher, MockTagPublisher
 from .pricing import Rates, format_cost, format_receipt, price, price_receipt
 from .usage_log import build_usage_log, write_usage_log
 from .dep_matrix import DepMatrix, build_dep_matrix, format_matrix
+from .router import Complexity, ModelTiers, Router, router_from_matrix
 
 __all__ = [
     "AgentRun",
@@ -40,4 +41,8 @@ __all__ = [
     "DepMatrix",
     "build_dep_matrix",
     "format_matrix",
+    "Complexity",
+    "ModelTiers",
+    "Router",
+    "router_from_matrix",
 ]

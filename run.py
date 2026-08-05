@@ -40,6 +40,7 @@ from orchestrator import (
 from orchestrator.pricing import Rates, format_receipt
 from orchestrator.dep_matrix import build_dep_matrix, format_matrix
 from orchestrator.live_status import LiveStatusBar
+from orchestrator.router import ModelTiers, router_from_matrix
 from orchestrator.scheduler import Wave, build_schedule
 from orchestrator.tags import GitHubTagPublisher, MockTagPublisher
 
@@ -55,13 +56,13 @@ def load_playbook(path: Path) -> str:
     return path.read_text()
 
 
-def _targets_from_config(cfg: dict) -> list[RepoTarget]:
+def _targets_from_config(cfg: dict, *, targets_root: Path) -> list[RepoTarget]:
     """Build RepoTargets; YAML depends_on is ignored (matrix overwrites)."""
     targets = []
     for raw in cfg["repos"]:
         row = dict(raw)
         row.pop("depends_on", None)
-        targets.append(RepoTarget(**row))
+        targets.append(RepoTarget(**row, root=targets_root))
     return targets
 
 
@@ -201,17 +202,45 @@ async def main() -> int:
         action="store_true",
         help="presentation-quality narration (waves, gates, PRs)",
     )
+    ap.add_argument(
+        "--route-models",
+        action="store_true",
+        help="pick model per repo from LOC/complexity (see routing: in repos.yaml)",
+    )
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     playbook = load_playbook(args.playbook)
-    targets = _targets_from_config(cfg)
+    targets = _targets_from_config(cfg, targets_root=args.targets_root)
 
     # Read each checkout and derive who-imports-whom before scheduling.
     print(f"\nScanning checkouts under {args.targets_root}/ for in-fleet dependencies…")
     matrix = build_dep_matrix(targets, roots=args.targets_root)
     targets = matrix.apply(targets)
     print(format_matrix(matrix))
+
+    route_cfg = cfg.get("routing") or {}
+    use_router = args.route_models or bool(route_cfg.get("enabled"))
+    router = None
+    if use_router:
+        default_model = cfg.get("model") or "composer-2.5"
+        tiers = ModelTiers(
+            easy=route_cfg.get("easy") or default_model,
+            mid=route_cfg.get("mid") or default_model,
+            hard=route_cfg.get("hard") or default_model,
+            easy_max=int(route_cfg.get("easy_max", 3)),
+            mid_max=int(route_cfg.get("mid_max", 7)),
+        )
+        router = router_from_matrix(
+            matrix,
+            targets,
+            roots=args.targets_root,
+            default_model=default_model,
+            tiers=tiers,
+        )
+        print("\nModel routing (LOC + complexity):")
+        for line in router.summary_lines():
+            print(line)
 
     bar = LiveStatusBar([t.name for t in targets])
 
@@ -286,6 +315,7 @@ async def main() -> int:
         wave_retries=2,
         wave_retry_delay=wave_retry_delay,
         tag_publisher=tag_publisher,
+        router=router,
         on_progress=on_progress,
         on_wave=on_wave if args.verbose or bar.active else None,
         on_step=on_step if args.verbose else None,
@@ -304,7 +334,10 @@ async def main() -> int:
     print(f"\nLaunching {len(targets)} migration agents "
           f"({mode_label}, concurrency={cfg.get('concurrency', 5)}/wave)")
     if args.verbose:
-        print(f"  model        {cfg.get('model') or '(default)'}")
+        if router:
+            print("  model        per-repo via router (see table above)")
+        else:
+            print(f"  model        {cfg.get('model') or '(default)'}")
         print(f"  poll every   {poll_interval:g}s  (max 300 polls/repo)")
         print(f"  API retries  6/call · wave re-queue ×2 (delay {wave_retry_delay:g}s)")
         print(f"  fleet tags   0.0.1.dev0 publish "
