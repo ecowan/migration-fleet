@@ -81,8 +81,39 @@ def load_targets(config_path: Path) -> list[RepoTarget]:
     for raw in cfg["repos"]:
         row = dict(raw)
         row.pop("depends_on", None)
+        row.pop("root", None)
         targets.append(RepoTarget(**row))
     return targets
+
+
+def _tag_url(owner: str, repo: str, name: str) -> str:
+    return f"https://github.com/{owner}/{repo}/releases/tag/{name}"
+
+
+def _lookup_tag(
+    http: httpx.Client, owner: str, repo: str, name: str
+) -> Optional[TagInfo]:
+    """Resolve one tag by name (covers tags outside the newest-N listing)."""
+    try:
+        resp = http.get(f"/repos/{owner}/{repo}/git/ref/tags/{name}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            if not data:
+                return None
+            data = data[0]
+        obj = data["object"]
+        sha = obj["sha"]
+        # Annotated tags point at a tag object; peel to the commit SHA.
+        if obj.get("type") == "tag":
+            tresp = http.get(f"/repos/{owner}/{repo}/git/tags/{sha}")
+            tresp.raise_for_status()
+            sha = tresp.json()["object"]["sha"]
+        return TagInfo(name=name, sha=sha, url=_tag_url(owner, repo, name))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _fetch_repo_github(
@@ -100,9 +131,14 @@ def _fetch_repo_github(
                 TagInfo(
                     name=row["name"],
                     sha=sha,
-                    url=f"https://github.com/{owner}/{repo}/releases/tag/{row['name']}",
+                    url=_tag_url(owner, repo, row["name"]),
                 )
             )
+        # Newest-N can miss the fleet pin once other tags pile up.
+        if not any(t.name == FLEET_DEV_VERSION for t in tags):
+            fleet = _lookup_tag(http, owner, repo, FLEET_DEV_VERSION)
+            if fleet is not None:
+                tags.append(fleet)
     except Exception as exc:  # noqa: BLE001
         return [], [], f"tags: {type(exc).__name__}: {exc}"
 

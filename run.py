@@ -62,6 +62,7 @@ def _targets_from_config(cfg: dict, *, targets_root: Path) -> list[RepoTarget]:
     for raw in cfg["repos"]:
         row = dict(raw)
         row.pop("depends_on", None)
+        row.pop("root", None)  # checkout root comes from --targets-root
         targets.append(RepoTarget(**row, root=targets_root))
     return targets
 

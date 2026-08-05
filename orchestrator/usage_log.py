@@ -32,6 +32,8 @@ def _run_record(run: AgentRun) -> dict:
         "status": run.status.value,
         "duration_s": run.duration_s,
         "pr_url": run.pr_url,
+        # Per-repo model (router pick or fleet default used at launch).
+        "model": run.model,
         "tokens": {
             "inputTokens": run.input_tokens,
             "outputTokens": run.output_tokens,

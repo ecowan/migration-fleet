@@ -230,9 +230,10 @@ def _breaking_pins(root: Path) -> list[str]:
     found: list[str] = []
     seen: set[str] = set()
     files = list(root.glob("requirements*.txt"))
-    setup = root / "setup.py"
-    if setup.is_file():
-        files.append(setup)
+    for extra in ("setup.py", "pyproject.toml"):
+        path = root / extra
+        if path.is_file():
+            files.append(path)
     for path in files:
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
