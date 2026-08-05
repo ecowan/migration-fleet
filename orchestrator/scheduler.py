@@ -1,9 +1,10 @@
 """Dependency-ordered wave scheduling.
 
-Consumes the dependency graph produced by the dependency-matrix skill (X imports
-Y imports Z) and orders the fleet so a shared library is migrated and verified
-*before* the services that depend on it. Migrating a consumer against an
-un-migrated dependency is how you get spurious failures at scale — so we don't.
+Consumes the dependency graph from `dep_matrix.build_dep_matrix()` (who declares
+or imports whom among fleet repos) and orders the fleet so a shared library is
+migrated and verified *before* the services that depend on it. Migrating a
+consumer against an un-migrated dependency is how you get spurious failures at
+scale — so we don't.
 
 Output is a list of **waves**. Repos within a wave have no unmet dependency on
 each other and run in parallel; waves run in sequence.

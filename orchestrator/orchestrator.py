@@ -8,7 +8,7 @@ Design seams (useful for the live-extension segment):
   * `gates`  -> add/remove verification without touching the run loop
   * `client` -> swap Mock for REST without touching anything else
   * `concurrency` -> one knob for "run 3" vs "run 300"
-  * `tag_publisher` -> after a lib is DONE, publish cursor.dev/<sha> for consumers
+  * `tag_publisher` -> after a lib is DONE, publish 0.0.1.dev0 tag for consumers
 """
 from __future__ import annotations
 
@@ -70,9 +70,9 @@ class FleetOrchestrator:
         self._on_step(repo, message)
 
     def _prompt_for(self, target: RepoTarget) -> tuple[str, dict[str, str]]:
-        """Base playbook + required upstream cursor.dev pins for this repo."""
+        """Base playbook + required upstream version pins for this repo."""
         required = {
-            name: self._fleet_tags[name].tag
+            name: self._fleet_tags[name].version
             for name in target.depends_on
             if name in self._fleet_tags
         }
@@ -175,28 +175,8 @@ class FleetOrchestrator:
                 self._step(name, f"classified → {run.status.value}")
                 await self._enrich(run)
 
-                # Libs: publish cursor.dev/<sha> on the PR head for downstream pins.
-                if (
-                    run.status is Status.DONE
-                    and target.publish_tag
-                    and self._tag_publisher
-                    and run.pr_url
-                ):
-                    self._step(name, "publishing cursor.dev tag on PR head…")
-                    try:
-                        dev = await self._tag_publisher.publish(
-                            name=target.name, url=target.url, pr_url=run.pr_url
-                        )
-                        self._fleet_tags[target.name] = dev
-                        run.dev_tag = dev.tag
-                        self._step(
-                            name,
-                            f"tagged {dev.tag} ({dev.pep440}) → {dev.git_dep}",
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        run.status = Status.ERROR
-                        run.error = f"tag publish failed: {type(exc).__name__}: {exc}"
-                        self._step(name, run.error)
+                # Libs: publish 0.0.1.dev0 on the PR head for downstream pins.
+                await self._maybe_publish_tag(run)
 
             except Exception as exc:  # noqa: BLE001 - surface any failure per-repo
                 run.status = Status.ERROR
@@ -207,6 +187,37 @@ class FleetOrchestrator:
         run.duration_s = time.perf_counter() - t0
         self._on_progress(run)
         return run
+
+    async def _maybe_publish_tag(self, run: AgentRun) -> None:
+        """Publish fleet version tag when this repo is a DONE lib; log the outcome."""
+        name = run.target.name
+        if run.status is not Status.DONE or not run.target.publish_tag:
+            return
+        if not self._tag_publisher:
+            self._step(
+                name,
+                "tag skip — no tag publisher (set GITHUB_TOKEN for live runs)",
+            )
+            return
+        if not run.pr_url:
+            self._step(name, "tag skip — no PR url to resolve a head commit")
+            return
+
+        self._step(name, f"publishing fleet version tag on PR head ({run.pr_url})…")
+        try:
+            dev = await self._tag_publisher.publish(
+                name=name, url=run.target.url, pr_url=run.pr_url
+            )
+            self._fleet_tags[name] = dev
+            run.dev_tag = dev.pin
+            self._step(
+                name,
+                f"tagged {dev.tag} @ {dev.sha[:7]} → pin {dev.pin} ({dev.pep508})",
+            )
+        except Exception as exc:  # noqa: BLE001
+            run.status = Status.ERROR
+            run.error = f"tag publish failed: {type(exc).__name__}: {exc}"
+            self._step(name, run.error)
 
     async def _cancel_quiet(self, run: AgentRun) -> None:
         if not run.agent_id:
@@ -313,9 +324,7 @@ class FleetOrchestrator:
                     self._step(
                         "*",
                         "fleet tags available: "
-                        + ", ".join(
-                            f"{n}@{t.tag}" for n, t in self._fleet_tags.items()
-                        ),
+                        + ", ".join(t.pin for t in self._fleet_tags.values()),
                     )
             wave_runs = await asyncio.gather(*(self.run_one(r) for r in runnable))
             for run in wave_runs:

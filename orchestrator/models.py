@@ -29,10 +29,11 @@ class RepoTarget:
     name: str
     url: str
     ref: str = "main"
-    # Names of repos this one imports. Populated from the dependency-matrix skill.
+    # Names of repos this one imports. Filled by dep_matrix.build_dep_matrix()
+    # from each checkout's requirements / setup.py / imports — not from YAML.
     # Semantics: every name listed here must migrate BEFORE this repo.
     depends_on: list[str] = field(default_factory=list)
-    # After DONE, tag the PR head as cursor.dev/<sha> for downstream git pins.
+    # After DONE, tag the PR head as 0.0.1.dev0 for downstream version pins.
     publish_tag: bool = False
 
 
@@ -56,7 +57,7 @@ class AgentRun:
     error: Optional[str] = None
     # Wall time from launch (or block decision) through terminal status.
     duration_s: Optional[float] = None
-    # Published cursor.dev/<sha> tag (libs with publish_tag=True).
+    # Published fleet pin, e.g. common-utils@0.0.1.dev0 (libs with publish_tag=True).
     dev_tag: Optional[str] = None
     # Token usage from GET /v1/agents/{id}/usage (totalUsage shape).
     usage: Optional[dict] = None

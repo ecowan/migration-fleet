@@ -24,6 +24,10 @@ The hero capabilities are the ones dep bots don't have: structural re-tooling
 
 ## 30-minute demo script
 
+> **`PRESENTATION_SCRIPT.md` is the authoritative beat-by-beat script** (11 sections,
+> with the timing cheat-sheet and the expected on-screen state). What follows is the
+> condensed version — keep this doc for the positioning, Q&A, and extension material.
+
 **(0–4 min) Problem framing — make it land for engineers who haven't lived it.**
 Open with this (the audience is all engineers, but may not share your migration
 context — this makes the pain legible in ~45 seconds):
@@ -54,29 +58,45 @@ doesn't scale, isn't auditable."
   pydantic v1, `.python-version` = 3.11. Run `pytest` — green.
 - **Show the dependency ordering first.** The scheduler prints the waves:
   `common-utils` (shared lib) → `risk-scoring` + `notifications-svc` → `payments-ledger`.
-  "The matrix skill computes who imports whom; the shared library migrates and
-  goes green before anything that depends on it. This is the fleet-level piece a
-  per-repo bot structurally cannot do."
+  "We scan each checkout's requirements and imports to build the dep matrix;
+  the shared library migrates and goes green before anything that depends on it.
+  This is the fleet-level piece a per-repo bot structurally cannot do."
 - Kick off the orchestrator. Narrate wave-by-wave execution, parallel within a wave.
 - While it runs, open a **pre-baked** PR: show the diff (justfile, `pyproject`,
   `uv.lock`, `utcnow`→`now(UTC)`, pydantic v2 — the *structural* changes, not a bump),
   and the agent's test-green artifact.
-- Land on the **dashboard**. Two hero moments:
-  1. `risk-scoring` → NEEDS_REVIEW: "it didn't fake success — it couldn't resolve a
-     transitive pin, so it flagged it. At 100 repos that triage IS the product."
-  2. `payments-ledger` → BLOCKED: "and because payments-ledger imports risk-scoring,
+- Land on the **dashboard**. Expected mix: **2 DONE · 1 NEEDS_REVIEW · 1 BLOCKED.**
+  Three hero moments:
+  1. `notifications-svc` → DONE with `PASS:upstream_pins`: "it consumed
+     `common-utils@0.0.1.dev0` the shared library published one wave earlier —
+     that's the fleet staying coherent mid-campaign."
+  2. `risk-scoring` → NEEDS_REVIEW: "it didn't fake success — it couldn't resolve a
+     transitive pin, so it flagged it. And look: it *passed* `upstream_pins`, so this
+     isn't a coordination failure — it pinned its upstream correctly and got stuck on
+     its own dependency. At 100 repos that precision IS the product."
+  3. `payments-ledger` → BLOCKED: "and because payments-ledger imports risk-scoring,
      the engine *refused* to migrate it against an unclean dependency. That safety
      is the difference between a fleet campaign and 100 independent PRs."
+- Point at the **cost receipt**: per-bucket token spend from `GET /v1/agents/{id}/usage`,
+  ~$1.13–$2.15 this run, projected $45–$86 across 120 repos. The range is honest —
+  Cursor doesn't publish a cache-write rate for composer-2.5, so it carries the
+  uncertainty instead of inventing a number.
 
 **(22–30 min) Trade-offs, limitations, roadmap.**
 - Trade-offs: Python + REST API (met the customer in their stack) vs the richer TS
   SDK (gave up streaming/subagents). Polling vs webhooks. Per-repo isolation vs a
-  shared cross-repo change.
-- Limitations: no cross-repo dependency ordering yet; gates are coarse; cost scales
-  with fleet size; template reconciliation is the riskiest step.
-- Roadmap: webhook-driven instead of polling; a dependency-graph scheduler so
-  shared libs migrate before their consumers; richer policy gates; a
-  merge-queue integration.
+  shared cross-repo change. Blocking consumers on unclean deps — safety over
+  throughput, on purpose.
+- Limitations: gates are coarse ("tests green" is a signal, not a proof); polling
+  not webhooks; template reconciliation is the riskiest step; cost scales linearly
+  with fleet size — which is why triage matters more than raw throughput.
+- Roadmap: webhook-driven instead of polling; richer policy + supply-chain gates;
+  merge-queue integration; and the same engine running the *next* campaign
+  ("rebuild every service on API v2") — a different playbook, same orchestrator.
+
+> Dependency-ordered scheduling is **built**, not roadmap — `dep_matrix.py` derives
+> the graph from repo contents and `scheduler.py` topo-sorts it into waves. Don't
+> list it as a gap; it's the differentiator.
 
 ## Q&A — anticipated questions + strong answers
 

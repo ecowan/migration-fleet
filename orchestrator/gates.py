@@ -45,13 +45,14 @@ def tests_green_gate(poll: dict[str, Any]) -> CheckResult:
     )
 
 
-def make_upstream_pins_gate(required_tags: dict[str, str]) -> Gate:
-    """Require the agent to have pinned each upstream `cursor.dev/…` tag.
+def make_upstream_pins_gate(required_pins: dict[str, str]) -> Gate:
+    """Require the agent to have pinned each upstream fleet version.
 
-    `required_tags` maps package name → tag ref (e.g. common-utils → cursor.dev/abc1234).
+    `required_pins` maps package name → version (e.g. common-utils → 0.0.1.dev0).
+    Accepts either ``name@version`` or ``name==version`` in the agent summary.
     """
     def upstream_pins_gate(poll: dict[str, Any]) -> CheckResult:
-        if not required_tags:
+        if not required_pins:
             return CheckResult("upstream_pins", True, "no upstream fleet pins required")
         blob = " ".join(
             [
@@ -59,11 +60,12 @@ def make_upstream_pins_gate(required_tags: dict[str, str]) -> Gate:
                 str(poll.get("raw") or {}),
             ]
         )
-        missing = [
-            f"{name}@{tag}"
-            for name, tag in required_tags.items()
-            if tag not in blob
-        ]
+        missing = []
+        for name, version in required_pins.items():
+            at_form = f"{name}@{version}"
+            eq_form = f"{name}=={version}"
+            if at_form not in blob and eq_form not in blob:
+                missing.append(at_form)
         if missing:
             return CheckResult(
                 "upstream_pins",
@@ -73,7 +75,7 @@ def make_upstream_pins_gate(required_tags: dict[str, str]) -> Gate:
         return CheckResult(
             "upstream_pins",
             True,
-            "pinned " + ", ".join(f"{n}@{t}" for n, t in required_tags.items()),
+            "pinned " + ", ".join(f"{n}@{v}" for n, v in required_pins.items()),
         )
 
     return upstream_pins_gate

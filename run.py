@@ -38,6 +38,7 @@ from orchestrator import (
     write_usage_log,
 )
 from orchestrator.pricing import Rates, format_receipt
+from orchestrator.dep_matrix import build_dep_matrix, format_matrix
 from orchestrator.live_status import LiveStatusBar
 from orchestrator.scheduler import Wave, build_schedule
 from orchestrator.tags import GitHubTagPublisher, MockTagPublisher
@@ -52,6 +53,16 @@ def load_config(path: Path) -> dict:
 
 def load_playbook(path: Path) -> str:
     return path.read_text()
+
+
+def _targets_from_config(cfg: dict) -> list[RepoTarget]:
+    """Build RepoTargets; YAML depends_on is ignored (matrix overwrites)."""
+    targets = []
+    for raw in cfg["repos"]:
+        row = dict(raw)
+        row.pop("depends_on", None)
+        targets.append(RepoTarget(**row))
+    return targets
 
 
 def _github_token() -> str:
@@ -143,7 +154,7 @@ def _verbose_progress(run, bar: LiveStatusBar | None = None) -> None:
             for a in run.artifacts[:5]:
                 lines.append(f"      · {a.get('path') or '?'}")
         if run.dev_tag:
-            lines.append(f"    cursor.dev  {run.dev_tag}")
+            lines.append(f"    fleet pin   {run.dev_tag}")
         if run.checks:
             lines.append("    gates")
             for c in run.checks:
@@ -171,6 +182,12 @@ async def main() -> int:
     mode.add_argument("--live", action="store_true", help="real Cloud Agent runs")
     ap.add_argument("--config", type=Path, default=HERE / "repos.yaml")
     ap.add_argument("--playbook", type=Path, default=HERE / "playbook/migration_playbook.md")
+    ap.add_argument(
+        "--targets-root",
+        type=Path,
+        default=HERE / "targets",
+        help="local checkouts used to build the dependency matrix",
+    )
     ap.add_argument("--environment", default=None, help="Cursor custom environment id (live)")
     ap.add_argument("--out", type=Path, default=HERE / "fleet_report.html")
     ap.add_argument(
@@ -188,7 +205,13 @@ async def main() -> int:
 
     cfg = load_config(args.config)
     playbook = load_playbook(args.playbook)
-    targets = [RepoTarget(**r) for r in cfg["repos"]]
+    targets = _targets_from_config(cfg)
+
+    # Read each checkout and derive who-imports-whom before scheduling.
+    print(f"\nScanning checkouts under {args.targets_root}/ for in-fleet dependencies…")
+    matrix = build_dep_matrix(targets, roots=args.targets_root)
+    targets = matrix.apply(targets)
+    print(format_matrix(matrix))
 
     bar = LiveStatusBar([t.name for t in targets])
 
@@ -202,13 +225,12 @@ async def main() -> int:
         """Client-level backoff notices (429/5xx) — always useful, even without -v."""
         _log_line(f"    ↻ {message}")
 
-    tag_publisher = None
+    gh_token = ""
     if args.dry_run:
         client = MockCursorClient(flaky_repo=cfg.get("flaky_repo"))
         # Keep a short poll cadence in a TTY so the live status bar / timer can tick.
         poll_interval = 0.35 if bar.active else 0.0
         wave_retry_delay = 0.2
-        tag_publisher = MockTagPublisher()
     else:
         api_key = os.environ.get("CURSOR_API_KEY", "")
         client = RestCursorClient(
@@ -219,17 +241,8 @@ async def main() -> int:
         poll_interval = 5.0
         wave_retry_delay = 10.0
         gh_token = _github_token()
-        if gh_token:
-            tag_publisher = GitHubTagPublisher(
-                gh_token,
-                on_step=(
-                    (lambda msg: _log_line(f"    · [fleet] {msg}"))
-                    if args.verbose
-                    else None
-                ),
-            )
-        else:
-            print("warning: no GitHub token — cursor.dev tags will not be published")
+        if not gh_token:
+            print("warning: no GitHub token — fleet version tags will not be published")
 
     def on_progress(run) -> None:
         if args.verbose:
@@ -247,6 +260,22 @@ async def main() -> int:
         """Fine-grained step log used only in --verbose."""
         prefix = "fleet" if repo == "*" else repo
         _log_line(f"    · [{prefix}] {message}")
+
+    def on_tag_step(message: str) -> None:
+        """Publisher-internal steps (resolve PR head, create ref, …)."""
+        _log_line(f"    · [tag] {message}")
+
+    if args.dry_run:
+        tag_publisher = MockTagPublisher(
+            on_step=on_tag_step if args.verbose else None
+        )
+    elif gh_token:
+        tag_publisher = GitHubTagPublisher(
+            gh_token,
+            on_step=on_tag_step if args.verbose else None,
+        )
+    else:
+        tag_publisher = None
 
     orch = FleetOrchestrator(
         client,
@@ -278,14 +307,14 @@ async def main() -> int:
         print(f"  model        {cfg.get('model') or '(default)'}")
         print(f"  poll every   {poll_interval:g}s  (max 300 polls/repo)")
         print(f"  API retries  6/call · wave re-queue ×2 (delay {wave_retry_delay:g}s)")
-        print(f"  cursor.dev   tag publish "
+        print(f"  fleet tags   0.0.1.dev0 publish "
               f"{'on' if tag_publisher else 'OFF'} "
               f"(libs with publish_tag: true)")
         print(f"  block upstream consumers when a dependency isn't clean: "
               f"{cfg.get('block_on_upstream', True)}")
         if args.dry_run and cfg.get("flaky_repo"):
             print(f"  demo inject  {cfg['flaky_repo']} → NEEDS_REVIEW (dry-run only)")
-        print("  step log     on (launch → poll → gates → classify)")
+        print("  step log     on (launch → poll → gates → classify → tag)")
 
     await bar.start_ticker()
     try:
@@ -302,9 +331,9 @@ async def main() -> int:
             print(f"  wave {w.index + 1} ({names}): {format_duration(w.duration_s)}")
         print(f"  total elapsed: {format_duration(result.duration_s)}")
         if orch.fleet_tags:
-            print("\n── cursor.dev tags ──")
+            print("\n── fleet version pins ──")
             for name, tag in orch.fleet_tags.items():
-                print(f"  {name}: {tag.tag}  →  {tag.git_dep}")
+                print(f"  {tag.pin}  (git tag {tag.tag} @ {tag.sha[:7]})")
     rates = Rates.from_config(cfg.get("pricing"))
     fleet_size = int(cfg.get("fleet_size") or 0) or None
     print(

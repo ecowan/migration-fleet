@@ -47,6 +47,7 @@ Key modules (`orchestrator/`):
 
 | file | responsibility |
 |------|----------------|
+| `dep_matrix.py`    | scans each checkout (`requirements.txt` / `setup.py` / imports) to build in-fleet `depends_on` |
 | `scheduler.py`     | dependency-sorts the fleet into migration **waves** (shared libs first); detects cycles |
 | `cursor_client.py` | REST client (`RestCursorClient`) + deterministic `MockCursorClient` behind one interface |
 | `orchestrator.py`  | wave-by-wave execution, bounded concurrency within a wave, polling, gates, upstream-blocking |
@@ -56,11 +57,12 @@ Key modules (`orchestrator/`):
 
 ### Dependency-ordered scheduling
 
-`depends_on` in `repos.yaml` (populated by the dependency-matrix skill: X imports
-Y imports Z) is topologically sorted into waves. Repos in a wave run in parallel;
-waves run in sequence, so `common-utils` migrates and verifies **before** the
-services that import it. If a dependency lands in `NEEDS_REVIEW`, its consumers
-are held `BLOCKED` rather than migrated against an unclean base. Import cycles are
+At startup, `dep_matrix` reads each local checkout under `targets/` and builds
+`depends_on` from declared requirements and cross-repo imports. That graph is
+topologically sorted into waves. Repos in a wave run in parallel; waves run in
+sequence, so `common-utils` migrates and verifies **before** the services that
+import it. If a dependency lands in `NEEDS_REVIEW`, its consumers are held
+`BLOCKED` rather than migrated against an unclean base. Import cycles are
 detected and flagged for a human instead of hanging the run.
 
 ## Run it

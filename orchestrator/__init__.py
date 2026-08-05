@@ -7,6 +7,7 @@ from .report import console_table, cost_summary, render_html
 from .tags import DevTag, GitHubTagPublisher, MockTagPublisher
 from .pricing import Rates, format_cost, format_receipt, price, price_receipt
 from .usage_log import build_usage_log, write_usage_log
+from .dep_matrix import DepMatrix, build_dep_matrix, format_matrix
 
 __all__ = [
     "AgentRun",
@@ -36,4 +37,7 @@ __all__ = [
     "format_receipt",
     "price",
     "price_receipt",
+    "DepMatrix",
+    "build_dep_matrix",
+    "format_matrix",
 ]

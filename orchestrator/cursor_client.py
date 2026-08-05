@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import re
 import uuid
 from typing import Any, Optional
 
@@ -270,6 +271,14 @@ class RestCursorClient(CursorClient):
         await self._http.aclose()
 
 
+# Fleet version pins as rendered into a consumer's prompt by
+# tags.render_pins_prompt(). Used by the mock to echo pins back the way a real
+# agent would after writing them into pyproject.toml (name@0.0.1.dev0).
+_PIN_REF = re.compile(
+    r"\b([A-Za-z0-9][A-Za-z0-9._-]*)@(0\.0\.1\.dev[0-9]+)\b"
+)
+
+
 class MockCursorClient(CursorClient):
     """Deterministic simulation: agents 'run' for a few polls then finish; one repo
     lands in NEEDS_REVIEW; a follow-up 'repairs' it. Fabricates token usage so the
@@ -296,6 +305,11 @@ class MockCursorClient(CursorClient):
     async def launch(self, target: RepoTarget, prompt: str, model: Optional[str]) -> str:
         attempts = self._launch_attempts.get(target.name, 0) + 1
         self._launch_attempts[target.name] = attempts
+        # A real agent that followed the playbook writes upstream version pins
+        # into pyproject.toml and mentions them in its summary — which is what
+        # upstream_pins_gate looks for. Mirror that here, or every consumer
+        # fails a gate in dry-run and the fleet-coherence story reads as broken.
+        pins = sorted({f"{m.group(1)}@{m.group(2)}" for m in _PIN_REF.finditer(prompt or "")})
         fail_n = self._transient_launch_failures.get(target.name, 0)
         if attempts <= fail_n:
             req = httpx.Request("POST", "https://api.cursor.com/v1/agents")
@@ -309,6 +323,7 @@ class MockCursorClient(CursorClient):
             "repaired": False,
             "cancelled": False,
             "run_id": f"run-mock{self._seq:03d}",
+            "pins": pins,
         }
         await asyncio.sleep(0.05)
         return agent_id
@@ -336,6 +351,15 @@ class MockCursorClient(CursorClient):
         flaky = self._is_flaky(st)
         target: RepoTarget = st["target"]
         pr_num = 40 + self._seq
+        pins: list[str] = st.get("pins") or []
+        # Note the flaky repo still reports its pins: it *did* pin its upstream,
+        # it just couldn't resolve its own transitive pydantic dep. Keeping those
+        # failures separate is what makes the NEEDS_REVIEW story precise on stage.
+        pin_note = (
+            " Pinned upstream fleet deps by version: "
+            + ", ".join(pins)
+            + "."
+        ) if pins else ""
         return {
             "done": True, "ok": True, "status": "FINISHED",
             "pr_url": f"{target.url}/pull/{pr_num}",
@@ -345,9 +369,11 @@ class MockCursorClient(CursorClient):
                 "bumped to 3.14. "
                 + ("Could not resolve pinned transitive dep (pydantic 1.x); left for review."
                    if flaky else "uv lock resolved; test suite green.")
+                + pin_note
             ),
             "duration_ms": 12_000 + self._seq * 1_000,
             "raw": {"mock": True, "flaky": flaky, "status": "FINISHED",
+                    "upstream_pins": pins,
                     "known_cves": ["CVE-2024-3772 (pydantic <2.0)"] if flaky else []},
         }
 

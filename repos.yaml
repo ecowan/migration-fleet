@@ -3,9 +3,9 @@
 # For the demo these point at the synthetic repos under ./targets. For a live
 # run, replace `url` with the GitHub URLs of your seeded demo repos.
 #
-# `depends_on` is populated by the dependency-matrix skill (X imports Y imports Z).
-# The scheduler topologically sorts these into migration waves so a shared library
-# migrates and verifies BEFORE the services that import it.
+# `depends_on` is computed at run time by scanning each checkout under targets/
+# (requirements.txt / setup.py / imports). Do not hand-author edges here — the
+# matrix step overwrites them. The scheduler then topo-sorts into migration waves.
 #
 # `flaky_repo` (dry-run only) forces one repo into NEEDS_REVIEW so both the human-
 # review AND the upstream-blocking stories are visible on stage.
@@ -31,20 +31,16 @@ pricing:
 fleet_size: 120            # real fleet size, for the projection
 
 repos:
-  - name: common-utils          # shared library — no deps, migrates first
+  - name: common-utils          # shared library — migrates first once matrix runs
     url: https://github.com/ecowan/common-utils
-    depends_on: []
-    publish_tag: true           # tag PR head as cursor.dev/<sha> for consumers
+    publish_tag: true           # tag PR head as 0.0.1.dev0 for consumers
 
   - name: risk-scoring          # imports common-utils; also a lib for payments
     url: https://github.com/ecowan/risk-scoring
-    depends_on: [common-utils]
     publish_tag: true
 
   - name: notifications-svc     # imports common-utils
     url: https://github.com/ecowan/notifications-svc
-    depends_on: [common-utils]
 
   - name: payments-ledger       # imports common-utils AND risk-scoring
     url: https://github.com/ecowan/payments-ledger
-    depends_on: [common-utils, risk-scoring]
