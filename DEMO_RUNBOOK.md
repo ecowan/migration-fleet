@@ -15,7 +15,8 @@ The hero capabilities are the ones dep bots don't have: structural re-tooling
 **cross-repo dependency-ordered scheduling**.
 
 ## Before the session (de-risking — do this the day before)
-1. Seed the three synthetic repos to GitHub; register the custom environment.
+1. Seed the synthetic repos to GitHub with `.cursor/Dockerfile` +
+   `.cursor/environment.json` on `main` (template under `environment/`).
 2. **Pre-run the fleet live once** so real PRs + artifacts already exist. Keep the
    PR tabs open. Screen-record the run as a fallback in case wifi/API misbehaves.
 3. Do the optional prep call — ask about environment setup and any REST rate limits.

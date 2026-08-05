@@ -77,7 +77,7 @@ Live run:
 
 ```bash
 export CURSOR_API_KEY=key_...              # Cursor API key (Basic auth)
-just run --live --environment <env-id>     # or: uv run python run.py --live ...
+just run --live                            # or: uv run python run.py --live
 ```
 
 `just --list` shows every recipe (`install`, `demo`, `run`, `test`, `lock`, `clean`).
@@ -85,7 +85,17 @@ No `uv`? A `requirements.txt` is still provided: `pip install -r requirements.tx
 
 For a live run, first **seed the demo repos on GitHub** (push the folders under
 `targets/` to real repos your key can access) and point `repos.yaml` `url`s at
-them, and register the custom environment from `environment/Dockerfile`.
+them. Each target must include a Cursor environment so agents get the playbook
+toolchain (Python 3.14, uv, just, copier):
+
+```
+.cursor/Dockerfile          # copy from environment/Dockerfile
+.cursor/environment.json    # copy from environment/environment.json
+```
+
+Cursor resolves `.cursor/environment.json` in the **cloned target repo** (not
+this orchestrator). Optional: `--environment <name>` still works for a named
+dashboard env, but Path A (per-repo `.cursor/`) is the default.
 
 ## Design seams (built to extend live)
 

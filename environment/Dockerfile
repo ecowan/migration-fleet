@@ -1,12 +1,17 @@
 # Custom environment for the migration Cloud Agents.
 # Preloads the exact toolchain the playbook assumes so agents don't waste turns
 # installing it: Python 3.14, uv, just, copier, git.
+#
+# Path A: copy this file to each target repo as `.cursor/Dockerfile` and commit
+# `.cursor/environment.json` (see environment.json alongside this file).
+# Cursor builds from the *target* repo the agent clones — not from migration-fleet.
 FROM python:3.14-slim
 
-# System deps: git for repo ops, curl for tool installers, build-essential for
-# any packages that still need to compile under 3.14.
+# System deps: git (required for Cursor's clone), sudo (recommended), curl for
+# tool installers, build-essential for packages that still compile under 3.14.
+# Do not COPY the project — Cursor checks out the correct commit itself.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git curl ca-certificates build-essential \
+        git sudo curl ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # uv (fast dependency resolver / installer) — pinned installer script.
