@@ -7,7 +7,7 @@ clear note in the PR description under "NEEDS REVIEW", and continue to the
 verification step so a human can pick it up.
 
 ## 1. Impose the standard project structure (copier template)
-- Apply the org copier template `gh:acme-fin/py-service-template` with defaults
+- Apply the org copier template `gh:ecowan/py-service-template` with defaults
   inferred from the repo (service name = repo name, package = existing `src/`
   package).
 - Reconcile, do not clobber: keep existing source, tests, and README content;
