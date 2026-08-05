@@ -6,6 +6,7 @@ __pycache__/
 .cursor_api_key
 live_fleet_run.log
 fleet_report.html
+fleet_usage.json
 .DS_Store
 
 # Seeded demo target repos (separate GitHub remotes; not part of this project)

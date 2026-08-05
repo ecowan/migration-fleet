@@ -47,7 +47,11 @@ class CursorClient(abc.ABC):
 
     @abc.abstractmethod
     async def usage(self, agent_id: str) -> dict[str, Any]:
-        """Return a token-usage dict (inputTokens, outputTokens, ..., totalTokens)."""
+        """Return the usage response body.
+
+        Implementations may return either the raw body (with token counts nested
+        under `totalUsage`) or a flat token dict; AgentRun handles both shapes.
+        """
 
     @abc.abstractmethod
     async def followup(self, agent_id: str, prompt: str) -> None:
@@ -200,7 +204,12 @@ class RestCursorClient(CursorClient):
         async def _get() -> dict[str, Any]:
             resp = await self._http.get(self._v(f"/agents/{agent_id}/usage"))
             resp.raise_for_status()
-            return resp.json().get("totalUsage", {})
+            # Return the whole body, not just totalUsage. Anything Cursor reports
+            # alongside the token buckets (a cost field, a rate multiplier, a plan
+            # tier) is otherwise dropped here and unrecoverable after the process
+            # exits. AgentRun._usage_root() unwraps totalUsage for token reads.
+            body = resp.json()
+            return body if isinstance(body, dict) else {"totalUsage": body}
 
         return await with_retries(
             _get,
@@ -352,8 +361,28 @@ class MockCursorClient(CursorClient):
             base = int(base * 1.35)  # follow-up run adds usage
         inp, out = base, base // 4
         cw, cr = base * 2, base * 3
-        return {"inputTokens": inp, "outputTokens": out, "cacheWriteTokens": cw,
-                "cacheReadTokens": cr, "totalTokens": inp + out + cw + cr}
+        # Match live GET /v1/agents/{id}/usage shape: buckets live under totalUsage.
+        return {
+            "totalUsage": {
+                "inputTokens": inp,
+                "outputTokens": out,
+                "cacheWriteTokens": cw,
+                "cacheReadTokens": cr,
+                "totalTokens": inp + out + cw + cr,
+            },
+            "runs": [
+                {
+                    "id": st.get("run_id") or "run-mock",
+                    "usage": {
+                        "inputTokens": inp,
+                        "outputTokens": out,
+                        "cacheWriteTokens": cw,
+                        "cacheReadTokens": cr,
+                        "totalTokens": inp + out + cw + cr,
+                    },
+                }
+            ],
+        }
 
     async def followup(self, agent_id: str, prompt: str) -> None:
         st = self._state[agent_id]

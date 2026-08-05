@@ -5,6 +5,8 @@ from .live_status import LiveStatusBar
 from .orchestrator import FleetOrchestrator, format_duration, summarize
 from .report import console_table, cost_summary, render_html
 from .tags import DevTag, GitHubTagPublisher, MockTagPublisher
+from .pricing import Rates, format_cost, format_receipt, price, price_receipt
+from .usage_log import build_usage_log, write_usage_log
 
 __all__ = [
     "AgentRun",
@@ -26,4 +28,12 @@ __all__ = [
     "console_table",
     "cost_summary",
     "render_html",
+    "build_usage_log",
+    "write_usage_log",
+    "Rates",
+    "price",
+    "format_cost",
+    "format_receipt",
+    "price",
+    "price_receipt",
 ]

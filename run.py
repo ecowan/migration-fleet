@@ -35,7 +35,9 @@ from orchestrator import (
     console_table,
     format_duration,
     render_html,
+    write_usage_log,
 )
+from orchestrator.pricing import Rates, format_receipt
 from orchestrator.live_status import LiveStatusBar
 from orchestrator.scheduler import Wave, build_schedule
 from orchestrator.tags import GitHubTagPublisher, MockTagPublisher
@@ -172,6 +174,12 @@ async def main() -> int:
     ap.add_argument("--environment", default=None, help="Cursor custom environment id (live)")
     ap.add_argument("--out", type=Path, default=HERE / "fleet_report.html")
     ap.add_argument(
+        "--usage-out",
+        type=Path,
+        default=HERE / "fleet_usage.json",
+        help="per-bucket token usage sidecar (raw API response preserved)",
+    )
+    ap.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="presentation-quality narration (waves, gates, PRs)",
@@ -297,13 +305,11 @@ async def main() -> int:
             print("\n── cursor.dev tags ──")
             for name, tag in orch.fleet_tags.items():
                 print(f"  {name}: {tag.tag}  →  {tag.git_dep}")
-    cost_per_mtok = float(cfg.get("cost_per_mtok") or 0) or None
+    rates = Rates.from_config(cfg.get("pricing"))
     fleet_size = int(cfg.get("fleet_size") or 0) or None
     print(
         "\n"
-        + console_table(
-            result, cost_per_mtok=cost_per_mtok, fleet_size=fleet_size
-        )
+        + console_table(result, rates=rates, fleet_size=fleet_size)
         + "\n"
     )
 
@@ -312,11 +318,30 @@ async def main() -> int:
         title="Python 3.14 Migration Fleet",
         subtitle="Standardize tooling (copier · uv · just) + upgrade 3.11 → 3.14",
         waves=[[r.name for r in w.repos] for w in schedule.waves],
-        cost_per_mtok=cost_per_mtok,
+        rates=rates,
         fleet_size=fleet_size,
     )
     args.out.write_text(html_doc)
     print(f"Dashboard written to {args.out}")
+
+    usage = write_usage_log(
+        result,
+        args.usage_out,
+        mode=("dry-run" if args.dry_run else "live"),
+        model=cfg.get("model"),
+        fleet_size=fleet_size,
+        rates=rates,
+    )
+    print(f"Usage log written to {args.usage_out}")
+    if usage.get("receipt"):
+        print("\n" + format_receipt(usage["receipt"]) + "\n")
+    elif usage["repos_priced"] and not usage["buckets_reported"]:
+        print(
+            "  warning: GET /usage returned totalTokens but no per-bucket split; "
+            "cannot compute spend"
+        )
+    elif not usage["repos_priced"]:
+        print("  (no usage data — blocked/errored fleet or /usage unavailable)")
 
     if hasattr(client, "aclose"):
         await client.aclose()

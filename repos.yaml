@@ -15,9 +15,19 @@ concurrency: 5             # max parallel agents WITHIN a wave (3 -> 300 knob)
 block_on_upstream: true    # don't migrate a consumer if its dependency isn't clean
 flaky_repo: risk-scoring   # dry-run only
 
-# Cost telemetry (from GET /v1/agents/{id}/usage). Rate is illustrative — swap for
-# your negotiated pricing. fleet_size drives the "projected cost across N repos".
-cost_per_mtok: 6.00        # $ per 1M tokens (blended, illustrative)
+# Cost telemetry: GET /v1/agents/{id}/usage → four token buckets → $/MTok rates.
+# Published composer-2.5 rates (per 1M tokens):
+#   standard  $0.50 in / $0.20 cache read / $2.50 out
+#   fast      $3.00 in / $0.50 cache read / $15.00 out  <- product default
+# cache_write is still unpublished ("-") — leave null for a 0×..1.25× input range,
+# or set cache_write_per_mtok once an invoice pins it.
+pricing:
+  tier: fast
+  # Optional overrides (null → use tier defaults above):
+  # input_per_mtok:
+  # output_per_mtok:
+  # cache_read_per_mtok:
+  cache_write_per_mtok:    # UNKNOWN — receipt shows a range for this bucket
 fleet_size: 120            # real fleet size, for the projection
 
 repos:

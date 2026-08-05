@@ -67,11 +67,50 @@ class AgentRun:
     def gates_passed(self) -> bool:
         return all(c.passed for c in self.checks)
 
+    def _usage_root(self) -> dict:
+        """Token counts, whether `usage` is the raw response body or totalUsage itself.
+
+        RestCursorClient stores the whole JSON body (so fields we don't model yet —
+        a cost line, a rate multiplier — survive to the usage log); MockCursorClient
+        returns the flat token dict. Accept both.
+        """
+        if not self.usage:
+            return {}
+        inner = self.usage.get("totalUsage")
+        return inner if isinstance(inner, dict) else self.usage
+
+    def _tok(self, key: str) -> int:
+        return int(self._usage_root().get(key) or 0)
+
+    @property
+    def input_tokens(self) -> int:
+        return self._tok("inputTokens")
+
+    @property
+    def output_tokens(self) -> int:
+        return self._tok("outputTokens")
+
+    @property
+    def cache_write_tokens(self) -> int:
+        return self._tok("cacheWriteTokens")
+
+    @property
+    def cache_read_tokens(self) -> int:
+        return self._tok("cacheReadTokens")
+
     @property
     def total_tokens(self) -> int:
-        if not self.usage:
-            return 0
-        return int(self.usage.get("totalTokens") or 0)
+        # Prefer the API's own total; fall back to summing buckets so a response
+        # that omits totalTokens still prices correctly instead of reading as free.
+        explicit = self._tok("totalTokens")
+        if explicit:
+            return explicit
+        return (
+            self.input_tokens
+            + self.output_tokens
+            + self.cache_write_tokens
+            + self.cache_read_tokens
+        )
 
 
 @dataclass
