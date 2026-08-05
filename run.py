@@ -12,10 +12,12 @@ Presentation narration (wave banners, gate detail, PR links):
     just dry-run -- --verbose
     # or: just demo
 
-Writes an HTML dashboard (fleet_report.html; fleet_report.dry-run.html under
---dry-run, so a simulated run can't overwrite a real one) and a console table.
-While a run is in progress, a sticky bottom status bar shows a progress bar and
-a live elapsed-time counter.
+Writes the latest HTML dashboard and usage sidecar into the current working
+directory (``fleet_report.html`` / ``fleet_usage.json``), and also archives a
+copy under ``outputs/<timestamp>/`` so prior runs are kept. Dry-run filenames
+get a ``.dry-run`` infix. Pass ``--out`` / ``--usage-out`` to override (no
+archive in that case). While a run is in progress, a sticky bottom status bar
+shows a progress bar and a live elapsed-time counter.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -196,15 +199,18 @@ async def main() -> int:
         "--out",
         type=Path,
         default=None,
-        help="dashboard path (default: fleet_report.html, "
-             "or fleet_report.dry-run.html under --dry-run)",
+        help="dashboard path (default: ./fleet_report.html in PWD, "
+             "or ./fleet_report.dry-run.html under --dry-run; "
+             "also archived under outputs/<timestamp>/)",
     )
     ap.add_argument(
         "--usage-out",
         type=Path,
         default=None,
         help="per-bucket token usage sidecar (raw API response preserved); "
-             "default: fleet_usage.json, or fleet_usage.dry-run.json under --dry-run",
+             "default: ./fleet_usage.json in PWD "
+             "(./fleet_usage.dry-run.json under --dry-run; "
+             "also archived under outputs/<timestamp>/)",
     )
     ap.add_argument(
         "-v", "--verbose",
@@ -218,15 +224,21 @@ async def main() -> int:
     )
     args = ap.parse_args()
 
-    # A dry run writes to its own filenames. The mock fabricates PR urls
-    # (`<repo>/pull/40+n`) that 404 against the real repos, so a simulated
-    # dashboard must never overwrite the one a live run produced. An explicit
-    # --out/--usage-out still wins.
+    # Latest artifacts land in PWD; a timestamped copy is also kept under
+    # outputs/ so prior runs aren't lost. Dry-run uses a .dry-run infix (the
+    # mock fabricates PR urls that 404 against real repos). Explicit --out /
+    # --usage-out still wins and skips the archive.
     suffix = ".dry-run" if args.dry_run else ""
+    cwd = Path.cwd()
+    archive_dir: Path | None = None
+    if args.out is None and args.usage_out is None:
+        archive_dir = cwd / "outputs" / datetime.now().strftime("%Y%m%d-%H%M%S")
     if args.out is None:
-        args.out = HERE / f"fleet_report{suffix}.html"
+        args.out = cwd / f"fleet_report{suffix}.html"
     if args.usage_out is None:
-        args.usage_out = HERE / f"fleet_usage{suffix}.json"
+        args.usage_out = cwd / f"fleet_usage{suffix}.json"
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.usage_out.parent.mkdir(parents=True, exist_ok=True)
 
     cfg = load_config(args.config)
     playbook = load_playbook(args.playbook)
@@ -414,6 +426,14 @@ async def main() -> int:
         rates=rates,
     )
     print(f"Usage log written to {args.usage_out}")
+
+    if archive_dir is not None:
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archived_out = archive_dir / args.out.name
+        archived_usage = archive_dir / args.usage_out.name
+        archived_out.write_text(html_doc)
+        archived_usage.write_text(args.usage_out.read_text())
+        print(f"Archived under {archive_dir}/")
     if usage.get("receipt"):
         print("\n" + format_receipt(usage["receipt"]) + "\n")
     elif usage["repos_priced"] and not usage["buckets_reported"]:

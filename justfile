@@ -114,8 +114,9 @@ test-one REPO="risk-scoring":
 lock:
     uv lock
 
-# remove caches and generated artifacts
+# remove caches and generated artifacts (including timestamped run outputs)
 clean:
     find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    rm -rf outputs
     rm -f fleet_report.html fleet_usage.json
     rm -f fleet_report.dry-run.html fleet_usage.dry-run.json

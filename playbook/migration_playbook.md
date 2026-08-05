@@ -62,6 +62,27 @@ verification step so a human can pick it up.
 - If not green after reasonable effort: open the PR anyway, mark it `NEEDS REVIEW`,
   and list exactly what failed and why.
 
+### 6a. Report the verdict (required, machine-read)
+End your final message **and** the PR description with exactly one line in this
+form — it is parsed by the fleet's verification gates:
+
+```
+fleet-verify: tests=<pass|fail> deps=<resolved|unresolved>
+```
+
+- `tests=pass` only if the full suite ran and passed without weakening it.
+  Skipped, xfailed-to-hide, or deleted tests are **not** a pass.
+- `deps=resolved` only if `uv lock` completed with every pin satisfied for 3.14.
+- Report honestly. `fail` / `unresolved` routes the repo to a human, which is a
+  correct outcome. **A missing or malformed line is treated as a failure**, so
+  claiming success without this line gains you nothing.
+
+Example for a repo that upgraded cleanly but could not resolve one transitive pin:
+
+```
+fleet-verify: tests=fail deps=unresolved
+```
+
 ## Guardrails
 - No business-logic changes. No public-API changes. No test weakening.
 - Prefer minimal diffs. Every deviation from the playbook must be noted in the PR.

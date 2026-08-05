@@ -370,6 +370,12 @@ class MockCursorClient(CursorClient):
                 + ("Could not resolve pinned transitive dep (pydantic 1.x); left for review."
                    if flaky else "uv lock resolved; test suite green.")
                 + pin_note
+                # The playbook requires this line; gates parse it rather than prose.
+                + (
+                    " fleet-verify: tests=fail deps=unresolved"
+                    if flaky else
+                    " fleet-verify: tests=pass deps=resolved"
+                )
             ),
             "duration_ms": 12_000 + self._seq * 1_000,
             "raw": {"mock": True, "flaky": flaky, "status": "FINISHED",

@@ -5,6 +5,8 @@ __pycache__/
 .python-version.bak
 .cursor_api_key
 live_fleet_run.log
+outputs/
+# legacy root-level run artifacts (pre-timestamped outputs/)
 fleet_report.html
 fleet_usage.json
 fleet_report.dry-run.html
