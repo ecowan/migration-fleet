@@ -59,6 +59,7 @@ class DepMatrix:
     """depends_on lists keyed by fleet repo name, plus scan diagnostics."""
     depends_on: dict[str, list[str]]
     identities: dict[str, RepoIdentity]
+    # Audit trail of how we learned about each dependency edge.
     edges: list[tuple[str, str, str]]  # (consumer, upstream, reason)
 
     def apply(self, targets: list[RepoTarget]) -> list[RepoTarget]:
